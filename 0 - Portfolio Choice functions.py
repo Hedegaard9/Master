@@ -291,3 +291,106 @@ def static_implement(data_tc, cov_list, lambda_list, rf, wealth, mu, gamma_rel, 
 
 
 #Portfolio-ML Inputs
+def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates, lb, scale,
+                   risk_free, features, rff_feat, seed, p_max, g, add_orig, iter, balanced):
+    np.random.seed(seed)
+
+    # Lookback dates
+    dates_lb = pd.date_range(start=min(dates) - pd.DateOffset(months=lb + 1), end=max(dates), freq="M")
+
+    # Generate random features if required
+    if rff_feat:
+        rff_x = generate_random_features(data_tc[features], p_max, g)
+        rff_w = rff_x['weights']
+        rff_features = rff_x['features']
+        rff_features.columns = [f"rff{i + 1}" for i in range(rff_features.shape[1])]
+        data = pd.concat([data_tc[["id", "eom", "valid", "ret_ld1", "tr_ld0", "mu_ld0"]], rff_features], axis=1)
+        feat_new = rff_features.columns.tolist()
+        if add_orig:
+            data = pd.concat([data, data_tc[features]], axis=1)
+            feat_new += features
+    else:
+        data = data_tc[["id", "eom", "valid", "ret_ld1", "tr_ld0", "mu_ld0"] + features]
+        feat_new = features
+
+    feat_cons = feat_new + ["constant"]
+
+    # Scaling
+    if scale:
+        scales = []
+        for d in dates_lb:
+            sigma = create_cov(cov_list[d])
+            diag_vol = np.sqrt(np.diag(sigma))
+            scales.append(pd.DataFrame({"id": sigma.index, "eom": d, "vol_scale": diag_vol}))
+        scales = pd.concat(scales)
+        data = data.merge(scales, on=["id", "eom"], how="left")
+        data["vol_scale"] = data.groupby("eom")["vol_scale"].transform(lambda x: x.fillna(x.median()))
+
+    # Balanced data
+    if balanced:
+        data[feat_new] = data.groupby("eom")[feat_new].transform(lambda x: x - x.mean())
+        data["constant"] = 1
+        data[feat_cons] = data.groupby("eom")[feat_cons].transform(lambda x: x / np.sqrt((x ** 2).sum()))
+
+    # Prepare signals and realizations
+    inputs = {}
+    for d in dates:
+        if d.year % 10 == 0 and d.month == 1:
+            print(f"--> PF-ML inputs: {d}")
+
+        data_ret = data[(data["valid"]) & (data["eom"] == d)][["id", "ret_ld1"]]
+        ids = data_ret["id"].values
+        sigma = create_cov(cov_list[d], ids)
+        lambda_matrix = create_lambda(lambda_list[d], ids)
+        w = wealth.loc[wealth["eom"] == d, "wealth"].values[0]
+        rf = risk_free.loc[risk_free["eom"] == d, "rf"].values[0]
+        m = m_func(w=w, mu=mu, rf=rf, sigma_gam=sigma * gamma_rel, gam=gamma_rel, lambda_matrix=lambda_matrix,
+                   iter=iter)
+
+        # Prepare signals
+        data_sub = data[(data["id"].isin(ids)) & (data["eom"] >= d - pd.DateOffset(months=lb))]
+        if not balanced:
+            data_sub[feat_new] = data_sub.groupby("eom")[feat_new].transform(lambda x: x - x.mean())
+            data_sub["constant"] = 1
+            data_sub[feat_cons] = data_sub.groupby("eom")[feat_cons].transform(lambda x: x / np.sqrt((x ** 2).sum()))
+
+        signals = {}
+        for d_new, group in data_sub.groupby("eom"):
+            s = group[feat_cons].to_numpy()
+            if scale:
+                s = np.diag(1 / group["vol_scale"].values) @ s
+            signals[d_new] = s
+
+        # Weighted signals (omega)
+        omega, const, omega_l1, const_l1 = 0, 0, 0, 0
+        for i in range(lb + 1):
+            d_new = d - pd.DateOffset(months=i)
+            d_new_l1 = d_new - pd.DateOffset(months=1)
+            s = signals.get(d_new, np.zeros((len(ids), len(feat_cons))))
+            s_l1 = signals.get(d_new_l1, np.zeros((len(ids), len(feat_cons))))
+
+            omega += m @ s
+            const += m
+            omega_l1 += m @ s_l1
+            const_l1 += m
+
+        omega = np.linalg.solve(const, omega)
+        omega_l1 = np.linalg.solve(const_l1, omega_l1)
+        omega_chg = omega - np.diag((1 + data_sub["tr_ld0"]) / (1 + data_sub["mu_ld0"])) @ omega_l1
+
+        r_tilde = omega.T @ data_ret["ret_ld1"].values
+        risk = gamma_rel * (omega.T @ sigma @ omega)
+        tc = w * (omega_chg.T @ lambda_matrix @ omega_chg)
+        denom = risk + tc
+
+        inputs[d] = {
+            "reals": {"r_tilde": r_tilde, "denom": denom, "risk": risk, "tc": tc},
+            "signal_t": signals.get(d, np.zeros((len(ids), len(feat_cons))))
+        }
+
+    return inputs
+
+
+
+
+
