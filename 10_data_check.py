@@ -2,7 +2,8 @@ import pandas as pd
 import os
 import pyarrow
 import pyarrow.parquet
-
+import Prepare_Data
+from Prepare_Data import *load_and_filter_market_returns
 # Sti til data-mappen
 data_folder = "./Data"
 
