@@ -49,8 +49,6 @@ def load_and_filter_market_returns(file_path):
         return None
 
 
-
-
 # Funktion til at indhente Factor Details og Cluster Labels og datahåndtering
 def process_cluster_labels(file_path_cluster_labels, file_path_factor_details):
     """
