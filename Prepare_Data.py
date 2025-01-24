@@ -1,4 +1,19 @@
 import pandas as pd
+from datetime import datetime
+from pandas.tseries.offsets import MonthEnd
+
+rente_path = "Data/ff3_m.csv"
+risk_free = pd.read_csv(rente_path, usecols=["yyyymm", "RF"])
+
+# Opret nye kolonner for risikofri rente og slutningen af måneden
+risk_free['rf'] = risk_free['RF'] / 100
+risk_free['eom'] = risk_free['yyyymm'].astype(str) + "01"
+risk_free['eom'] = pd.to_datetime(risk_free['eom'], format="%Y%m%d") + MonthEnd(0)
+
+risk_free = risk_free[['eom', 'rf']]
+
+print(risk_free)
+
 
 
 # Load market returns og filtrer på USA og mkt_vw_exc
