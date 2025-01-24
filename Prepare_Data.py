@@ -1,18 +1,27 @@
 import pandas as pd
-from datetime import datetime
 from pandas.tseries.offsets import MonthEnd
 
+def process_risk_free_rate(file_path):
+    """
+    Args:
+        file_path (str): Stien til CSV-filen med risikofri rente-data.
+    Returns:
+        pd.DataFrame: En DataFrame med to kolonner: 'eom' (slutningen af måneden) og 'rf' (risikofri rente i procent).
+    """
+    # Læs data fra filen
+    risk_free = pd.read_csv(file_path, usecols=["yyyymm", "RF"])
+
+    # Opret nye kolonner for risikofri rente og slutningen af måneden
+    risk_free['rf'] = risk_free['RF'] / 100  # Konverter risikofri rente til procent
+    risk_free['eom'] = risk_free['yyyymm'].astype(str) + "01"
+    risk_free['eom'] = pd.to_datetime(risk_free['eom'], format="%Y%m%d") + MonthEnd(0)
+
+    # Returner kun de nødvendige kolonner
+    return risk_free[['eom', 'rf']]
+#Duummy check
 rente_path = "Data/ff3_m.csv"
-risk_free = pd.read_csv(rente_path, usecols=["yyyymm", "RF"])
-
-# Opret nye kolonner for risikofri rente og slutningen af måneden
-risk_free['rf'] = risk_free['RF'] / 100
-risk_free['eom'] = risk_free['yyyymm'].astype(str) + "01"
-risk_free['eom'] = pd.to_datetime(risk_free['eom'], format="%Y%m%d") + MonthEnd(0)
-
-risk_free = risk_free[['eom', 'rf']]
-
-print(risk_free)
+risk_free_df = process_risk_free_rate(rente_path)
+print(risk_free_df)
 
 
 
