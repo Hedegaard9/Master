@@ -5,6 +5,11 @@ def process_risk_free_rate(file_path):
     """
     Args:
         file_path (str): Stien til CSV-filen med risikofri rente-data.
+    Example:
+        #Duummy check
+        rente_path = "Data/ff3_m.csv"
+        risk_free_df = process_risk_free_rate(rente_path)
+        print(risk_free_df)
     Returns:
         pd.DataFrame: En DataFrame med to kolonner: 'eom' (slutningen af måneden) og 'rf' (risikofri rente i procent).
     """
@@ -18,10 +23,7 @@ def process_risk_free_rate(file_path):
 
     # Returner kun de nødvendige kolonner
     return risk_free[['eom', 'rf']]
-#Duummy check
-rente_path = "Data/ff3_m.csv"
-risk_free_df = process_risk_free_rate(rente_path)
-print(risk_free_df)
+
 
 
 
@@ -168,6 +170,7 @@ def monthly_returns(risk_free, h_list, file_path):
 
     # Kombiner alle resultater til én samlet DataFrame
     final_result = pd.concat(results, ignore_index=True)
-    final_result.to_csv("monthly_preprocessed.csv", index=False)
+    final_result.to_csv("Data/monthly_preprocessed.csv", index=False)
     # Returner den kombinerede DataFrame
     return final_result
+
