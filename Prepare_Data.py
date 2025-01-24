@@ -173,3 +173,4 @@ def monthly_returns(risk_free, h_list, file_path):
     final_result.to_csv("Data/monthly_preprocessed.csv", index=False)
     # Returner den kombinerede DataFrame
     return final_result
+
