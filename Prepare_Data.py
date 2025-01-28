@@ -177,3 +177,51 @@ def monthly_returns(risk_free, h_list, file_path):
     # Returner den kombinerede DataFrame
     return final_result
 
+# Wealth: Assumed portfolio growth
+def wealth_func(wealth_end, end, market, risk_free):
+    """
+    Beregner porteføljevækst over tid.
+
+    Args:
+        wealth_end (float): Slutværdien af porteføljen.
+        end (str): Slutdato for perioden (format: "YYYY-MM-DD").
+        market (pd.DataFrame): DataFrame med markedets afkast (kolonne: 'mkt_vw_exc').
+        risk_free (pd.DataFrame): DataFrame med risikofrit afkast (kolonne: 'rf').
+
+    Returns:
+        pd.DataFrame: DataFrame med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur).
+    """
+
+    # Merge market og risk_free data på 'eom_ret'
+    wealth = risk_free.rename(columns={"eom": "eom_ret"}).merge(
+        market, on="eom_ret", how="left"
+    )
+
+    # Beregn total return (tret = mkt_vw_exc + rf)
+    wealth["tret"] = wealth["mkt_vw_exc"] + wealth["rf"]
+
+    # Filtrer kun op til slutdato
+    wealth = wealth[wealth["eom_ret"] <= pd.to_datetime(end)]
+
+    # Sortér data i faldende rækkefølge af 'eom_ret'
+    wealth = wealth.sort_values(by="eom_ret", ascending=False)
+
+    # Beregn kumulativ vækst og wealth over tid
+    wealth["wealth"] = (1 - wealth["tret"]).cumprod() * wealth_end
+
+    # Justér datoer til slutningen af måneden
+    wealth["eom"] = wealth["eom_ret"].dt.to_period("M").dt.to_timestamp("M")
+
+    # Tilføj slutværdien (wealth_end) til dataset
+    final_row = pd.DataFrame({
+        "eom": [pd.to_datetime(end)],
+        "wealth": [wealth_end],
+        "mu_ld1": [np.nan]
+    })
+    wealth = pd.concat([wealth, final_row], ignore_index=True)
+
+    # Sortér data i stigende rækkefølge af 'eom'
+    wealth = wealth.sort_values(by="eom").reset_index(drop=True)
+
+    # Returér kun relevante kolonner
+    return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
