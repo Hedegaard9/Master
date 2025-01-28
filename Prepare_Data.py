@@ -225,3 +225,71 @@ def wealth_func(wealth_end, end, market, risk_free):
 
     # Returér kun relevante kolonner
     return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
+
+
+# Prepare data -----------------------------------
+def load_and_prepare_data(file_path, features):
+    """
+    Indlæser og forbereder rådata fra en Parquet-fil.
+
+    Args:
+        file_path (str): Stien til Parquet-filen (USA testfil).
+        features (list): Liste over features, der skal indlæses.
+    Example:
+        file_path_usa_dsf_test = "./data_test/usa_dsf_test.parquet"
+        data = load_and_prepare_data(file_path_usa_test, features)
+    Returns:
+        pd.DataFrame: DataFrame med forberedte data.
+    """
+    # Liste over kolonner, vi gerne vil have
+    desired_cols = ["id", "eom", "sic", "ff49", "size_grp", "me", "crsp_exchcd", "rvol_252d", "dolvol_126d"] + features
+
+    # Tjek hvilke kolonner der faktisk findes i Parquet-filen
+    actual_cols = pd.read_parquet(file_path, engine="pyarrow").columns
+    cols_to_load = [col for col in desired_cols if col in actual_cols]
+
+    if not cols_to_load:
+        raise ValueError("Ingen af de ønskede kolonner findes i Parquet-filen.")
+
+    # Indlæs kun de kolonner, der faktisk findes
+    data = pd.read_parquet(file_path, engine="pyarrow", columns=cols_to_load)
+
+    # Filtrér observationer
+    data = data[data["id"] <= 99999]
+
+    # Konverter datoformat for 'eom'
+    data["eom"] = pd.to_datetime(data["eom"], errors="coerce")
+
+    return data
+
+
+
+
+
+
+
+
+
+# last one - load dauly returns from usa_dsf_test
+def prepare_daily_returns(file_path, data):
+    """
+    Forbereder daglige afkastdata.
+
+    Args:
+        file_path (str): Stien til CSV-filen med daglige data. usa_dsf
+        chars (pd.DataFrame): Filtreret DataFrame med gyldige observationer.
+
+    Example:
+        prepare_daily_returns("./data_test/usa_dsf_test.parquet", data)
+        Her er data skabt fra tidligere ting i denne py fil.
+
+    Returns:
+        pd.DataFrame: DataFrame med daglige afkast.
+    """
+    usecols = ["id", "date", "ret_exc"]
+    daily = pd.read_parquet(file_path, engine="pyarrow", columns=usecols)
+    daily = daily[daily["ret_exc"].notna() & daily["id"].isin(data["id"].unique())]
+    daily["date"] = pd.to_datetime(daily["date"], format="%Y%m%d")
+    daily["eom"] = daily["date"] + pd.offsets.MonthEnd(0)
+
+    return daily
