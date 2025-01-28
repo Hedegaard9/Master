@@ -78,7 +78,11 @@ def process_cluster_labels(file_path_cluster_labels, file_path_factor_details):
     # file_path_factor_details = "./Data/Factor Details.xlsx"
 
     # Brug funktionen som følger:
-    # result = process_cluster_labels(file_path_cluster_labels, file_path_factor_details)
+    #rente_path = "Data/ff3_m.csv"
+    #risk_free = process_risk_free_rate(rente_path)
+    #h_list = [1,2]
+    #file_path_usa = "Data/usa.parquet"
+    #result = monthly_returns(risk_free=risk_free, h_list=h_list, file_path=file_path_usa)
 
     Returnerer:
     - pd.DataFrame: En opdateret DataFrame med de transformerede data.
