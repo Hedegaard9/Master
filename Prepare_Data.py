@@ -1,5 +1,6 @@
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
+import General_Functions as GF
 
 def process_risk_free_rate(file_path):
     """
@@ -49,8 +50,6 @@ def load_and_filter_market_returns(file_path):
     except Exception as e:
         print(f"Der opstod en fejl ved indlæsning eller filtrering af filen: {e}")
         return None
-
-
 
 
 # Funktion til at indhente Factor Details og Cluster Labels og datahåndtering
@@ -147,7 +146,7 @@ def monthly_returns(risk_free, h_list, file_path):
     # Loop over horisonter i h_list
     for h in h_list:
         # Beregn langsigtede afkast
-        data_ret = General_Functions.long_horizon_ret(data=monthly, h=h, impute="zero")
+        data_ret = GF.long_horizon_ret(data=monthly, h=h, impute="zero")
 
         # Tilføj 'eom_ret'
         data_ret["eom_ret"] = data_ret["eom"] + MonthEnd(1)
