@@ -69,7 +69,7 @@ def filter_ids_from_dataset(file_path_input, file_path_id_test, output_path, sta
     print(f"Fil gemt som {output_path}")
 
 
-def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./data_test/risk_free_filtered.csv"):
+def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./data_test/risk_free_tst.csv"):
     """
     Indlæser en CSV-fil med risikofri rente-data, konverterer datoer og filtrerer på startdato (og evt. slutdato),
     og gemmer resultatet som en CSV-fil i 'data_test'-mappen.
@@ -78,7 +78,7 @@ def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./
         file_path (str): Stien til CSV-filen med risikofri rente-data.
         start_date (str): Startdato i formatet 'YYYY-MM-DD'.
         end_date (str, optional): Slutdato i formatet 'YYYY-MM-DD'. Hvis None, filtreres kun på startdato.
-        output_path (str, optional): Sti til den filtrerede CSV-fil. Standard er "./data_test/risk_free_filtered.csv".
+        output_path (str, optional): Sti til den filtrerede CSV-fil. Standard er "./data_test/risk_free_test.csv".
 
     Example:
         rente_path = "Data/ff3_m.csv"
@@ -184,3 +184,37 @@ def monthly_returns(risk_free, h_list, file_path):
     final_result.to_csv("data_test/monthly_preprocessed_test.csv", index=False)
     # Returner den kombinerede DataFrame
     return final_result
+
+
+# ===============================
+# MAIN FUNKTION
+# ===============================
+def main():
+    # Filstier og parametre
+    file_path_usa_dsf = "./Data/usa_dsf.parquet"
+    file_path_usa = "./Data/usa.parquet"
+    file_path_id_test = "./data_test/top_5_percent_ids.csv"
+    output_path_usa_dsf = "./data_test/usa_dsf_test.parquet"
+    output_path_usa = "./data_test/usa_test.parquet"
+    start_date = "2010-01-31"
+
+    # Filtrér ID'er for usa_dsf og usa
+    filter_ids_from_dataset(file_path_usa_dsf, file_path_id_test, output_path_usa_dsf, start_date)
+    filter_ids_from_dataset(file_path_usa, file_path_id_test, output_path_usa, start_date)
+
+    # Processér risikofri rente
+    rente_path = "Data/ff3_m.csv"
+    risk_free = process_risk_free_rate(rente_path, start_date)
+
+    # Beregn månedlige afkast
+    h_list = [1, 2]  # Horisonter
+    final_result = monthly_returns(risk_free, h_list, output_path_usa)
+
+    print("Alle processer er gennemført!")
+
+
+# ===============================
+# KØR SCRIPTET
+# ===============================
+if __name__ == "__main__":
+    main()
