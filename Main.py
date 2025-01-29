@@ -19,7 +19,7 @@ output = {}
 sns.set_theme(style="whitegrid")
 colours_theme = [
     "#0C6291", "#A63446", "#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E",
-    "darkslategrey", "blue3", "red3", "purple2", "yellow2", "aquamarine",
+    "darkslategrey", "blue", "red", "purple", "yellow", "aquamarine",
     "grey", "salmon", "antiquewhite", "chartreuse"
 ]
 
