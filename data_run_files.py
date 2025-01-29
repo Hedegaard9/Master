@@ -69,7 +69,7 @@ def filter_ids_from_dataset(file_path_input, file_path_id_test, output_path, sta
     print(f"Fil gemt som {output_path}")
 
 
-def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./data_test/risk_free_tst.csv"):
+def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./data_test/risk_free_test.csv"):
     """
     Indlæser en CSV-fil med risikofri rente-data, konverterer datoer og filtrerer på startdato (og evt. slutdato),
     og gemmer resultatet som en CSV-fil i 'data_test'-mappen.
