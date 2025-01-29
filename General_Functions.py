@@ -52,6 +52,12 @@ def long_horizon_ret(data, h, impute):
     for l in range(1, h + 1):
         full_ret[f'ret_ld{l}'] = full_ret.groupby('id')['ret_exc'].shift(-l)
     full_ret.drop(columns=['ret_exc'], inplace=True)
+
+    # Fjern rækker, hvor alle ret_ld værdier er NaN
+    all_missing = full_ret.iloc[:, -h:].isna().all(axis=1)
+    print(f"All missing excludes {all_missing.mean() * 100:.2f}% of the observations")
+    full_ret = full_ret[~all_missing].reset_index(drop=True)
+
     if impute == "zero":
         full_ret.update(full_ret.iloc[:, -h:].fillna(0))
     elif impute == "mean":

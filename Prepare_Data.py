@@ -1,6 +1,8 @@
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
+from pandas.tseries.offsets import MonthEnd
+from Main import settings
 
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
@@ -170,70 +172,73 @@ def process_cluster_labels(file_path_cluster_labels, file_path_factor_details):
     return cluster_labels
 
 
-def monthly_returns(risk_free, h_list, file_path):
+
+
+def process_return_data(file_path_world_ret, risk_free_path):
     """
-    Behandler data ved at udvælge kolonner, filtrere USA-data og beregne langsigtede afkast.
+    :param file_path_world_ret:
+    :param risk_free_path:
+    :return: en dataframe med afkast for næste periode (månedvis)
 
-    Parameters:
-        risk_free (DataFrame): DataFrame med risikofri afkast, skal indeholde 'eom' og 'rf'.
-        h_list (list): Liste af horisonter til beregning af langsigtede afkast.
-        file_path (str): Sti til datafilen (CSV), der indeholder 'excntry', 'id', 'eom', 'ret_exc_lead1m'.
-
-    Example:
-    h_list = [1,2]  # Liste af horisonter
-
-    # Kald funktionen:
-    result = process_data(risk_free=risk_free, h_list=h_list, file_path=file_path_usa)
-
-    Returns:
-        DataFrame: Den samlede DataFrame med resultater for alle horisonter.
+    Eksempel
+    file_path_world_ret="./data_test/world_ret_test.csv"
+    risk_free_path="./data_test/risk_free_test.csv"
+    data_ret_ld1 = process_return_data(file_path_world_ret, risk_free_path)
     """
-    # Læs data fra filen
-    df_usa = pd.read_parquet(file_path, engine='pyarrow')
-    kolonner = ["excntry", "id", "eom", "ret_exc_lead1m"]
-    monthly = df_usa[kolonner]
+    # Indlæs data
+    monthly = pd.read_csv(file_path_world_ret, usecols=["excntry", "id", "eom", "ret_exc"], dtype={"eom": str})
 
-    # Omdøb kolonnen 'ret_exc_lead1m' til 'ret_exc'
-    monthly = monthly.rename(columns={"ret_exc_lead1m": "ret_exc"})
-
-    # Filtrer kun USA og id <= 99999
+    # Filtrér kun USA og CRSP-observationer
     monthly = monthly[(monthly["excntry"] == "USA") & (monthly["id"] <= 99999)]
 
-    # Konverter 'eom' til datoformat
-    monthly["eom"] = pd.to_datetime(monthly["eom"], format="%Y%m%d")
+    # Konverter 'eom' fra string til datetime
+    monthly["eom"] = pd.to_datetime(monthly["eom"])
 
-    # Initialiser en tom liste til resultater
-    results = []
+    # Hent tidshorisont
+    horizon_K = settings["pf"]["hps"]["m1"]["K"]
 
-    # Loop over horisonter i h_list
-    for h in h_list:
-        # Beregn langsigtede afkast
-        data_ret = GF.long_horizon_ret(data=monthly, h=h, impute="zero")
+    # Anvend long_horizon_ret
+    data_ret = GF.long_horizon_ret(monthly, h=horizon_K, impute="zero")
+    data_ret = data_ret.drop(columns=["start", "end", "merge_date"])
 
-        # Tilføj 'eom_ret'
-        data_ret["eom_ret"] = data_ret["eom"] + MonthEnd(1)
+    # Behold nødvendige kolonner
+    data_ret_ld1 = data_ret[["id", "eom", "ret_ld1"]].copy()
 
-        # Filtrer til relevante kolonner
-        data_ret_ld1 = data_ret[["id", "eom", "eom_ret", f"ret_ld{h}"]]
+    # Beregn eom_ret: sidste dag i næste måned
+    data_ret_ld1["eom_ret"] = data_ret_ld1["eom"] + pd.DateOffset(months=1)
+    data_ret_ld1["eom_ret"] = data_ret_ld1["eom_ret"] + MonthEnd(0)
 
-        # Merge med risikofri data
-        data_ret_ld1 = data_ret_ld1.merge(risk_free, on="eom", how="left")
+    # Omarranger kolonnerne
+    data_ret_ld1 = data_ret_ld1[["id", "eom", "eom_ret", "ret_ld1"]]
 
-        # Beregn total return
-        data_ret_ld1["tr_ld1"] = data_ret_ld1[f"ret_ld{h}"] + data_ret_ld1["rf"]
-        data_ret_ld1.drop(columns=["rf"], inplace=True)
+    # Merge med risk_free data
+    risk_free = process_risk_free_rate(risk_free_path)
+    data_ret_ld1 = data_ret_ld1.merge(risk_free, on="eom", how="left")
 
-        # Tilføj horisont som kolonne
-        data_ret_ld1["horizon"] = h
+    # Beregn total afkast: excess return + rf
+    data_ret_ld1["tr_ld1"] = data_ret_ld1["ret_ld1"] + data_ret_ld1["rf"]
 
-        # Gem resultatet for denne horisont
-        results.append(data_ret_ld1)
+    # Fjern 'rf' kolonnen efter brug
+    data_ret_ld1.drop(columns=["rf"], inplace=True)
 
-    # Kombiner alle resultater til én samlet DataFrame
-    final_result = pd.concat(results, ignore_index=True)
-    final_result.to_csv("Data/monthly_preprocessed.csv", index=False)
-    # Returner den kombinerede DataFrame
-    return final_result
+    # Opret en kopi med justeret eom
+    data_ret_ld1_shifted = data_ret_ld1[["id", "eom", "tr_ld1"]].copy()
+
+    # Flyt eom til næste måneds sidste dag
+    data_ret_ld1_shifted["eom"] = data_ret_ld1_shifted["eom"] + pd.DateOffset(months=1)
+    data_ret_ld1_shifted["eom"] = data_ret_ld1_shifted["eom"] + MonthEnd(0)
+
+    # Omdøb tr_ld1 til tr_ld0
+    data_ret_ld1_shifted.rename(columns={"tr_ld1": "tr_ld0"}, inplace=True)
+
+    # Merge for at inkludere tr_ld0
+    data_ret_ld1 = data_ret_ld1.merge(data_ret_ld1_shifted, on=["id", "eom"], how="left")
+
+    # Omarranger kolonner
+    data_ret_ld1 = data_ret_ld1[["id", "eom", "tr_ld0", "eom_ret", "ret_ld1", "tr_ld1"]]
+
+    return data_ret_ld1
+
 
 # Wealth: Assumed portfolio growth
 def wealth_func(wealth_end, end, market, risk_free):
