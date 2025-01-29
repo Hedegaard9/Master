@@ -57,10 +57,7 @@ def merge_rvol_data(file_path_usa, file_path_rvol_252):
     return df
 
 
-file_path_usa = "./Data/usa.parquet"
-file_path_rvol_252 = "./Data/rvol_252.csv"
 
-df_merged = merge_rvol_data(file_path_usa, file_path_rvol_252)
 
 
 def process_risk_free_rate(file_path):
