@@ -1,6 +1,7 @@
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
+from Prepare_Data import load_and_filter_market_returns
 
 def filter_ids_from_dataset(file_path_input, file_path_id_test, output_path, start_date):
     """
@@ -237,6 +238,38 @@ def monthly_returns(risk_free, h_list, file_path):
     # Returner den kombinerede DataFrame
     return final_result
 
+def filter_and_save_data(file_path, start_date, end_date, output_path):
+    """
+    Indlæser vores market returns, filtrerer data efter start/slutdato, og gemmer den filtrerede version.
+
+    Parametre:
+    file_path (str): Sti til input CSV-fil.
+    start_date (str): Startdato i format 'YYYY-MM-DD'.
+    end_date (str): Slutdato i format 'YYYY-MM-DD'.
+    output_path (str): Sti til output CSV-fil.
+
+    Example:
+    file_path_market_returns = "./Data/market_returns.csv"
+    output_path = "data_test/market_returns_test.csv"
+    start_date = "2010-01-31"
+    end_date = "2023-11-30"
+    filter_and_save_data(file_path_market_returns, start_date, end_date, output_path)
+    """
+
+    # Læs CSV-fil
+    market_returns = load_and_filter_market_returns(file_path)
+
+    # Konverter eom til datetime-format
+    market_returns['eom'] = pd.to_datetime(market_returns['eom'])
+
+    # Filtrer data baseret på dato
+    filtered_df = market_returns[(market_returns['eom'] >= start_date) & (market_returns['eom'] <= end_date)]
+
+    # Gem den filtrerede data til en ny CSV-fil
+    filtered_df.to_csv(output_path, index=False)
+
+    print(f"Fil gemt som {output_path} med {len(filtered_df)} rækker.")
+
 
 # ===============================
 # MAIN FUNKTION
@@ -246,8 +279,10 @@ def main():
     file_path_usa_dsf = "./Data/usa_dsf.parquet"
     file_path_usa = "./Data/usa_rvol.parquet"
     file_path_id_test = "./data_test/top_5_percent_ids.csv"
+    file_path_market_returns = "./Data/market_returns.csv"
     output_path_usa_dsf = "./data_test/usa_dsf_test.parquet"
     output_path_usa = "./data_test/usa_test.parquet"
+    output_path_market_returns = "data_test/market_returns_test.csv"
     file_path_world_ret = "./Data/world_ret_monthly.csv"
     start_date = "2010-01-31"
     end_date = "2023-11-30"
@@ -263,6 +298,8 @@ def main():
     #Dan ret_monthly_test fil
     world_ret_monthly_test_filter(file_path_id_test, file_path_world_ret, start_date, end_date)
 
+    # lav testsæt for market returns
+    filter_and_save_data(file_path_market_returns, start_date, end_date, output_path_market_returns)
     # Beregn månedlige afkast
     #h_list = [1, 2]  # Horisonter
     #final_result = monthly_returns(risk_free, h_list, output_path_usa)
