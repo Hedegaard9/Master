@@ -1,7 +1,7 @@
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
-
+import numpy as np
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
     """
@@ -55,8 +55,6 @@ def merge_rvol_data(file_path_usa, file_path_rvol_252):
     print("Filen 'usa_rvol.parquet' er gemt succesfuldt i ./Data mappen!")
 
     return df
-
-
 
 
 

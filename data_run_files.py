@@ -192,7 +192,7 @@ def monthly_returns(risk_free, h_list, file_path):
 def main():
     # Filstier og parametre
     file_path_usa_dsf = "./Data/usa_dsf.parquet"
-    file_path_usa = "./Data/usa.parquet"
+    file_path_usa = "./Data/usa_rvol.parquet"
     file_path_id_test = "./data_test/top_5_percent_ids.csv"
     output_path_usa_dsf = "./data_test/usa_dsf_test.parquet"
     output_path_usa = "./data_test/usa_test.parquet"
