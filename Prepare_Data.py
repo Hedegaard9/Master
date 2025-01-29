@@ -2,6 +2,64 @@ import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
 
+
+def merge_rvol_data(file_path_usa, file_path_rvol_252):
+    """
+    Indlæser USA data fra Parquet og rvol_252 fra CSV, konverterer relevante kolonner,
+    merger dataene på 'id' og 'eom', udskriver antal ikke-NaN værdier før og efter merge,
+    og gemmer den merged dataframe som 'usa_rvol.parquet' i ./Data/ mappen.
+
+    Args:
+    - file_path_usa (str): Sti til Parquet-filen.
+    - file_path_rvol_252 (str): Sti til CSV-filen.
+    Example:
+    file_path_usa = "./Data/usa.parquet"
+    file_path_rvol_252 = "./Data/rvol_252.csv"
+
+    df_merged = merge_rvol_data(file_path_usa, file_path_rvol_252)
+    Returns:
+    - df (pd.DataFrame): Den merged dataframe.
+    """
+
+    # Indlæs data
+    df = pd.read_parquet(file_path_usa, engine='pyarrow')
+    print("Fil indlæst med succes. Antal rækker før filtrering:", len(df))
+
+    rvol_252 = pd.read_csv(file_path_rvol_252)
+
+    # Konverter 'id' til samme datatype (int64)
+    df['id'] = df['id'].astype('int64')
+
+    # Konverter 'eom' til datetime
+    df['eom'] = pd.to_datetime(df['eom'])
+    rvol_252['eom'] = pd.to_datetime(rvol_252['eom'])
+
+    # Udskriv antal ikke-NaN værdier i rvol_252d i rvol_252 før merge
+    num_non_nan_rvol_252 = rvol_252['rvol_252d'].notna().sum()
+    print(f"Antal ikke-NaN værdier i 'rvol_252d' i rvol_252 før merge: {num_non_nan_rvol_252}")
+
+    # Merge dataene baseret på 'id' og 'eom'
+    df = df.merge(rvol_252[['id', 'eom', 'rvol_252d']], on=['id', 'eom'], how='left')
+
+    # Udskriv antal ikke-NaN værdier i 'rvol_252d' efter merge
+    num_non_nan_df = df['rvol_252d'].notna().sum()
+    print(f"Antal ikke-NaN værdier i 'rvol_252d' i df efter merge: {num_non_nan_df}")
+
+    # Tjek om vi nu får nogle ikke-NaN værdier
+    print(df[['id', 'eom', 'rvol_252d']].head(10))
+
+    # Gem den merged dataframe som Parquet i ./Data/ mappen
+    save_path = "./Data/usa_rvol.parquet"
+    df.to_parquet(save_path, engine="pyarrow", index=False)
+
+    print("Filen 'usa_rvol.parquet' er gemt succesfuldt i ./Data mappen!")
+
+    return df
+
+
+
+
+
 def process_risk_free_rate(file_path):
     """
     Args:
