@@ -120,6 +120,58 @@ def process_risk_free_rate(file_path, start_date, end_date=None, output_path="./
 
 
 
+def world_ret_monthly_test_filter(file_path_id_test, file_path_world_ret, start_date, end_date, output_file="./data_test/world_ret_test.csv"):
+    """
+    Filtrerer world_ret-data for kun at inkludere ID'er fra id_test samt rækker inden for en bestemt dato-interval.
+
+    Parameters:
+    file_path_id_test (str): Sti til CSV-fil med ID'er.
+    file_path_world_ret (str): Sti til CSV-fil med world_ret-data.
+    start_date (str): Startdato i formatet "YYYY-MM-DD".
+    end_date (str): Slutdato i formatet "YYYY-MM-DD".
+    output_file (str): Sti til output CSV-fil (default: "filtered_world_ret_filtered_by_date.csv").
+
+    Returns:
+    None: Funktionen gemmer den filtrerede DataFrame som en CSV-fil.
+
+    Example:
+    file_path_id_test = "./data_test/top_5_percent_ids.csv"
+    file_path_world_ret = "./Data/world_ret_monthly.csv"
+    start_date = "2010-01-31"
+    end_date = "2023-11-30"
+
+    world_ret_monthly_test_filter(file_path_id_test, file_path_world_ret, start_date, end_date)
+    """
+    # Læs CSV-filer
+    world_ret = pd.read_csv(file_path_world_ret)
+    id_test = pd.read_csv(file_path_id_test)
+
+    # Filtrér world_ret for kun at inkludere id'er fra id_test
+    filtered_world_ret = world_ret[world_ret['id'].isin(id_test['id'])]
+
+    # Konverter 'eom' til datetime-format
+    filtered_world_ret['eom'] = pd.to_datetime(filtered_world_ret['eom'], format='%Y%m%d')
+
+    # Filtrér baseret på dato-intervallet
+    filtered_world_ret = filtered_world_ret[
+        (filtered_world_ret['eom'] >= start_date) & (filtered_world_ret['eom'] <= end_date)
+        ]
+
+    # Gem den filtrerede DataFrame til en ny CSV-fil
+    filtered_world_ret.to_csv(output_file, index=False)
+
+    # Bekræftelse
+    print(f"Data gemt i: {output_file}")
+    print(filtered_world_ret.head())
+    print(filtered_world_ret.tail())
+    print(f"Shape efter dato-filter: {filtered_world_ret.shape}")
+
+    # Tæl unikke ID'er efter filtrering
+    unique_ids_count = filtered_world_ret['id'].nunique()
+    print(f"Antal unikke ID'er efter dato-filter: {unique_ids_count}")
+
+
+
 def monthly_returns(risk_free, h_list, file_path):
     """
     Behandler data ved at udvælge kolonner, filtrere USA-data og beregne langsigtede afkast.
@@ -192,11 +244,13 @@ def monthly_returns(risk_free, h_list, file_path):
 def main():
     # Filstier og parametre
     file_path_usa_dsf = "./Data/usa_dsf.parquet"
-    file_path_usa = "./Data/usa.parquet"
+    file_path_usa = "./Data/usa_rvol.parquet"
     file_path_id_test = "./data_test/top_5_percent_ids.csv"
     output_path_usa_dsf = "./data_test/usa_dsf_test.parquet"
     output_path_usa = "./data_test/usa_test.parquet"
+    file_path_world_ret = "./Data/world_ret_monthly.csv"
     start_date = "2010-01-31"
+    end_date = "2023-11-30"
 
     # Filtrér ID'er for usa_dsf og usa
     filter_ids_from_dataset(file_path_usa_dsf, file_path_id_test, output_path_usa_dsf, start_date)
@@ -206,9 +260,12 @@ def main():
     rente_path = "Data/ff3_m.csv"
     risk_free = process_risk_free_rate(rente_path, start_date)
 
+    #Dan ret_monthly_test fil
+    world_ret_monthly_test_filter(file_path_id_test, file_path_world_ret, start_date, end_date)
+
     # Beregn månedlige afkast
-    h_list = [1, 2]  # Horisonter
-    final_result = monthly_returns(risk_free, h_list, output_path_usa)
+    #h_list = [1, 2]  # Horisonter
+    #final_result = monthly_returns(risk_free, h_list, output_path_usa)
 
     print("Alle processer er gennemført!")
 
