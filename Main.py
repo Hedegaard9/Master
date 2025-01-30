@@ -182,7 +182,7 @@ features = [
   "zero_trades_252d",
   "rvol_252d"
 ]
-
+print(f"Features list length: {len(features)}")
 # Exclude features without sufficient coverage
 feat_excl = [
                "capex_abn", "capx_gr2", "capx_gr3", "debt_gr3", "dgp_dsale",
