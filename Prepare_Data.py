@@ -3,6 +3,7 @@ from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
 from pandas.tseries.offsets import MonthEnd
 from Main import settings
+import numpy as np
 
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
