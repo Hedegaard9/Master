@@ -337,8 +337,78 @@ def wealth_func(wealth_end, end, market, risk_free):
     # --- 6) Returnér de vigtige kolonner ---
     return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
 
+def wealth_func2(wealth_end, end, market, risk_free):
+    """
+    Beregner porteføljevækst over tid med datoer justeret til den sidste dag i hver måned
+    og forskudt en måned tilbage.
 
+    Args:
+        wealth_end (float): Slutværdien af porteføljen.
+        end (str): Slutdato for perioden ("YYYY-MM-DD").
+        market (pd.DataFrame): Markedsafkast (kolonner fx: 'eom' / 'eom_ret', 'mkt_vw_exc').
+        risk_free (pd.DataFrame): Risikofrit afkast (kolonner fx: 'eom' / 'eom_ret', 'rf').
 
+    Returns:
+        pd.DataFrame: Med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur),
+                      hvor 'eom' er den sidste dag i måneden og forskudt én måned tilbage.
+    """
+
+    # --- 1) Find dato-kolonnen i hver DataFrame ---
+    def find_date_col(df):
+        if "eom" in df.columns:
+            return "eom"
+        elif "eom_ret" in df.columns:
+            return "eom_ret"
+        else:
+            raise ValueError("Ingen 'eom' eller 'eom_ret' kolonne i DataFrame")
+
+    risk_free_date = find_date_col(risk_free)
+    market_date = find_date_col(market)
+
+    # --- 2) Omdøb til et fælles navn, fx "date" ---
+    risk_free = risk_free.rename(columns={risk_free_date: "date"})
+    market = market.rename(columns={market_date: "date"})
+
+    # --- 3) Konverter 'date' til datetime i begge DataFrames ---
+    risk_free["date"] = pd.to_datetime(risk_free["date"])
+    market["date"] = pd.to_datetime(market["date"])
+
+    # --- 4) Merge på "date" ---
+    wealth = risk_free.merge(market, on="date", how="left")
+
+    # --- 5) Beregninger ---
+    # a) Total return (tret = mkt_vw_exc + rf)
+    wealth["tret"] = wealth["mkt_vw_exc"] + wealth["rf"]
+
+    # b) Filtrér på slutdato
+    wealth = wealth[wealth["date"] <= pd.to_datetime(end)]
+
+    # c) Sortér i faldende rækkefølge (seneste dato øverst)
+    wealth = wealth.sort_values(by="date", ascending=False)
+
+    # d) **Wealth-beregning bevares uændret fra din oprindelige funktion**
+    wealth["wealth"] = (1 - wealth["tret"]).cumprod() * wealth_end
+
+    # e) **Sæt 'eom' til sidste dag i måneden OG forskyd én måned tilbage**
+    wealth["eom"] = (wealth["date"] + pd.offsets.MonthEnd(0)) - pd.DateOffset(months=1)
+    wealth["eom"] = wealth["eom"] + pd.offsets.MonthEnd(0)  # Sikrer, at vi stadig har månedsslut
+
+    # f) Fjern dubletter i 'eom' (hvis der er flere observationer i samme måned)
+    wealth = wealth.drop_duplicates(subset=["eom"], keep="last")
+
+    # g) Tilføj en slut-række med wealth_end (uden forskydning)
+    final_row = pd.DataFrame({
+        "eom": [pd.to_datetime(end) + pd.offsets.MonthEnd(0)],  # Sikrer sidste dag i måneden
+        "wealth": [wealth_end],  # Wealth skal være wealth_end
+        "mu_ld1": [np.nan]
+    })
+    wealth = pd.concat([wealth, final_row], ignore_index=True)
+
+    # h) Sortér i stigende rækkefølge (ældste dato først)
+    wealth = wealth.sort_values(by="eom").reset_index(drop=True)
+
+    # --- 6) Returnér de vigtige kolonner ---
+    return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
 
 
 risk_free_path="./data_test/risk_free_test.csv"
@@ -351,6 +421,9 @@ wealth = wealth_func(wealth_end, end, market, risk_free)
 print(wealth.head())
 print(wealth.tail())
 
+wealth = wealth_func2(wealth_end, end, market, risk_free)
+print(wealth.head())
+print(wealth.tail())
 
 
 
