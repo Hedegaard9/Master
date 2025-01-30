@@ -3,7 +3,7 @@ from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
 from pandas.tseries.offsets import MonthEnd
 from Main import settings
-
+import numpy as np
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
     """
@@ -110,6 +110,26 @@ def load_and_filter_market_returns(file_path):
     except Exception as e:
         print(f"Der opstod en fejl ved indlæsning eller filtrering af filen: {e}")
         return None
+
+# Load market returns og filtrer på USA og mkt_vw_exc
+def load_and_filter_market_returns_test(file_path):
+    """
+    Example:
+    import Prepare_Data
+    Prepare_Data.load_and_filter_market_returns(file_path_market_returns)
+    :param file_path:
+    :return: market_returns_df
+    """
+    try:
+        # Læs filen
+        market_returns_df = pd.read_csv(file_path)
+
+        print("Filen er indlæst og filtreret succesfuldt.")
+        return market_returns_df
+    except Exception as e:
+        print(f"Der opstod en fejl ved indlæsning eller filtrering af filen: {e}")
+        return None
+
 
 
 # Funktion til at indhente Factor Details og Cluster Labels og datahåndtering
@@ -247,35 +267,67 @@ def wealth_func(wealth_end, end, market, risk_free):
 
     Args:
         wealth_end (float): Slutværdien af porteføljen.
-        end (str): Slutdato for perioden (format: "YYYY-MM-DD").
-        market (pd.DataFrame): DataFrame med markedets afkast (kolonne: 'mkt_vw_exc').
-        risk_free (pd.DataFrame): DataFrame med risikofrit afkast (kolonne: 'rf').
+        end (str): Slutdato for perioden ("YYYY-MM-DD").
+        market (pd.DataFrame): Markedsafkast (kolonner fx: 'eom' / 'eom_ret', 'mkt_vw_exc').
+        risk_free (pd.DataFrame): Risikofrit afkast (kolonner fx: 'eom' / 'eom_ret', 'rf').
+
+    Example:
+        market = load_and_filter_market_returns_test("data_test/market_returns_test.csv")
+        print(market.head())
+        risk_free = process_risk_free_rate("data_test/risk_free_test.csv")
+        print(risk_free.head())
+        wealth_end = 1e+10
+        end = "2023-11-30"
+
+        wealth = wealth_func(wealth_end, end, market, risk_free)
+        print(wealth.head())
+        print(wealth.tail())
 
     Returns:
-        pd.DataFrame: DataFrame med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur).
+        pd.DataFrame: Med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur).
     """
 
-    # Merge market og risk_free data på 'eom_ret'
-    wealth = risk_free.rename(columns={"eom": "eom_ret"}).merge(
-        market, on="eom_ret", how="left"
-    )
+    # --- 1) Find dato-kolonnen i hver DataFrame ---
+    def find_date_col(df):
+        if "eom" in df.columns:
+            return "eom"
+        elif "eom_ret" in df.columns:
+            return "eom_ret"
+        else:
+            raise ValueError("Ingen 'eom' eller 'eom_ret' kolonne i DataFrame")
 
-    # Beregn total return (tret = mkt_vw_exc + rf)
+    risk_free_date = find_date_col(risk_free)
+    market_date    = find_date_col(market)
+
+    # --- 2) Omdøb til et fælles navn, fx "date" ---
+    risk_free = risk_free.rename(columns={risk_free_date: "date"})
+    market    = market.rename(columns={market_date: "date"})
+
+    # --- 3) Konverter 'date' til datetime i begge DataFrames ---
+    risk_free["date"] = pd.to_datetime(risk_free["date"])
+    market["date"]    = pd.to_datetime(market["date"])
+
+    # --- 4) Merge på "date" ---
+    wealth = risk_free.merge(market, on="date", how="left")
+
+    # --- 5) Beregninger ---
+    # a) total return (tret = mkt_vw_exc + rf)
     wealth["tret"] = wealth["mkt_vw_exc"] + wealth["rf"]
 
-    # Filtrer kun op til slutdato
-    wealth = wealth[wealth["eom_ret"] <= pd.to_datetime(end)]
+    # b) Filtrér på slutdato
+    wealth = wealth[wealth["date"] <= pd.to_datetime(end)]
 
-    # Sortér data i faldende rækkefølge af 'eom_ret'
-    wealth = wealth.sort_values(by="eom_ret", ascending=False)
+    # c) Sortér i faldende rækkefølge (seneste dato øverst)
+    wealth = wealth.sort_values(by="date", ascending=False)
 
-    # Beregn kumulativ vækst og wealth over tid
+    # d) Kumulativ formue: (1 - afkast) da mkt_vw_exc er eks. risikofri rente.
+    #    Ret evt. efter definition af "tret" i dit datasæt
     wealth["wealth"] = (1 - wealth["tret"]).cumprod() * wealth_end
 
-    # Justér datoer til slutningen af måneden
-    wealth["eom"] = wealth["eom_ret"].dt.to_period("M").dt.to_timestamp("M")
+    # e) Lav 'eom' som sidste dag i måneden
+    wealth["eom"] = wealth["date"].dt.to_period("M").dt.to_timestamp("M")
 
-    # Tilføj slutværdien (wealth_end) til dataset
+    # f) Tilføj en slut-række med wealth_end (så dataset slutter på 'end' i tabellen)
     final_row = pd.DataFrame({
         "eom": [pd.to_datetime(end)],
         "wealth": [wealth_end],
@@ -283,11 +335,12 @@ def wealth_func(wealth_end, end, market, risk_free):
     })
     wealth = pd.concat([wealth, final_row], ignore_index=True)
 
-    # Sortér data i stigende rækkefølge af 'eom'
+    # g) Sortér i stigende rækkefølge (ældste dato først)
     wealth = wealth.sort_values(by="eom").reset_index(drop=True)
 
-    # Returér kun relevante kolonner
+    # --- 6) Returnér de vigtige kolonner ---
     return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
+
 
 
 # Prepare data -----------------------------------
@@ -345,6 +398,13 @@ def prepare_daily_returns(file_path, data):
     Example:
         prepare_daily_returns("./data_test/usa_dsf_test.parquet", data)
         Her er data skabt fra tidligere ting i denne py fil.
+        data = pd.read_parquet("./data_test/usa_test.parquet", engine="pyarrow")
+        print(data.head())
+
+
+            df = prepare_daily_returns("./data_test/usa_dsf_test.parquet", data)
+            print(df.head())
+        Dog giver dette bedst mening at gøre med data efterbehandling fra usa filen.
 
     Returns:
         pd.DataFrame: DataFrame med daglige afkast.
