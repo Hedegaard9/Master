@@ -2,7 +2,7 @@ import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
 from pandas.tseries.offsets import MonthEnd
-from Main import settings
+from Main import settings, pf_set
 import numpy as np
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
@@ -263,7 +263,7 @@ def process_return_data(file_path_world_ret, risk_free_path):
 # Wealth: Assumed portfolio growth
 def wealth_func(wealth_end, end, market, risk_free):
     """
-    Beregner porteføljevækst over tid.
+    Beregner porteføljevækst over tid med en måneds forskydning.
 
     Args:
         wealth_end (float): Slutværdien af porteføljen.
@@ -271,20 +271,17 @@ def wealth_func(wealth_end, end, market, risk_free):
         market (pd.DataFrame): Markedsafkast (kolonner fx: 'eom' / 'eom_ret', 'mkt_vw_exc').
         risk_free (pd.DataFrame): Risikofrit afkast (kolonner fx: 'eom' / 'eom_ret', 'rf').
 
-    Example:
-        market = load_and_filter_market_returns_test("data_test/market_returns_test.csv")
-        print(market.head())
-        risk_free = process_risk_free_rate("data_test/risk_free_test.csv")
-        print(risk_free.head())
-        wealth_end = pf_set["wealth"]
-        end = "2023-11-30"
-
-        wealth = wealth_func(wealth_end, end, market, risk_free)
-        print(wealth.head())
-        print(wealth.tail())
-
     Returns:
-        pd.DataFrame: Med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur).
+        pd.DataFrame: Med kolonner: 'eom', 'wealth', 'mu_ld1' (log-retur), hvor eom er forskudt en måned tilbage.
+
+    Eksempel på brug
+    risk_free_path="./data_test/risk_free_test.csv"
+    market_path="./data_test/market_returns_test.csv"
+    market = load_and_filter_market_returns_test(market_path)
+    risk_free = process_risk_free_rate(risk_free_path)
+    wealth_end = pf_set["wealth"]
+    end = settings["split"]["test_end"]
+    wealth = wealth_func(wealth_end, end, market, risk_free)
     """
 
     # --- 1) Find dato-kolonnen i hver DataFrame ---
@@ -297,15 +294,15 @@ def wealth_func(wealth_end, end, market, risk_free):
             raise ValueError("Ingen 'eom' eller 'eom_ret' kolonne i DataFrame")
 
     risk_free_date = find_date_col(risk_free)
-    market_date    = find_date_col(market)
+    market_date = find_date_col(market)
 
     # --- 2) Omdøb til et fælles navn, fx "date" ---
     risk_free = risk_free.rename(columns={risk_free_date: "date"})
-    market    = market.rename(columns={market_date: "date"})
+    market = market.rename(columns={market_date: "date"})
 
     # --- 3) Konverter 'date' til datetime i begge DataFrames ---
     risk_free["date"] = pd.to_datetime(risk_free["date"])
-    market["date"]    = pd.to_datetime(market["date"])
+    market["date"] = pd.to_datetime(market["date"])
 
     # --- 4) Merge på "date" ---
     wealth = risk_free.merge(market, on="date", how="left")
@@ -320,18 +317,17 @@ def wealth_func(wealth_end, end, market, risk_free):
     # c) Sortér i faldende rækkefølge (seneste dato øverst)
     wealth = wealth.sort_values(by="date", ascending=False)
 
-    # d) Kumulativ formue: (1 - afkast) da mkt_vw_exc er eks. risikofri rente.
-    #    Ret evt. efter definition af "tret" i dit datasæt
+    # d) Kumulativ formueberegning
     wealth["wealth"] = (1 - wealth["tret"]).cumprod() * wealth_end
 
-    # e) Lav 'eom' som sidste dag i måneden
-    wealth["eom"] = wealth["date"].dt.to_period("M").dt.to_timestamp("M")
+    # e) Lav 'eom' som sidste dag i måneden, **og forskyd en måned tilbage**
+    wealth["eom"] = wealth["date"].dt.to_period("M").dt.to_timestamp("M") - pd.DateOffset(months=1)
 
     # f) Tilføj en slut-række med wealth_end (så dataset slutter på 'end' i tabellen)
     final_row = pd.DataFrame({
-        "eom": [pd.to_datetime(end)],
-        "wealth": [wealth_end],
-        "mu_ld1": [np.nan]
+        "eom": [pd.to_datetime(end)],  # Sørger for at det er præcis end-datoen
+        "wealth": [wealth_end],  # Wealth skal være wealth_end
+        "mu_ld1": [np.nan]  # mu_ld1 skal være NaN
     })
     wealth = pd.concat([wealth, final_row], ignore_index=True)
 
@@ -340,6 +336,23 @@ def wealth_func(wealth_end, end, market, risk_free):
 
     # --- 6) Returnér de vigtige kolonner ---
     return wealth[["eom", "wealth", "tret"]].rename(columns={"tret": "mu_ld1"})
+
+
+
+
+
+risk_free_path="./data_test/risk_free_test.csv"
+market_path="./data_test/market_returns_test.csv"
+market = load_and_filter_market_returns_test(market_path)
+risk_free = process_risk_free_rate(risk_free_path)
+wealth_end = pf_set["wealth"]
+end = settings["split"]["test_end"]
+wealth = wealth_func(wealth_end, end, market, risk_free)
+print(wealth.head())
+print(wealth.tail())
+
+
+
 
 
 
