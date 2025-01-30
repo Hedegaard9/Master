@@ -81,6 +81,7 @@ def sigma_gam_adj(sigma_gam, g, cov_type):
         cor_mat_adj = cor_mat * (1 - g) + np.eye(len(cor_mat)) * g
         return np.diag(sd_vec) @ cor_mat_adj @ np.diag(sd_vec)
 
+
 # Initial weights
 def initial_weights_new(data, w_type, udf_weights=None):
     if w_type == "vw":
