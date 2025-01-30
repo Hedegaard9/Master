@@ -276,7 +276,7 @@ def wealth_func(wealth_end, end, market, risk_free):
         print(market.head())
         risk_free = process_risk_free_rate("data_test/risk_free_test.csv")
         print(risk_free.head())
-        wealth_end = 1e+10
+        wealth_end = pf_set["wealth"]
         end = "2023-11-30"
 
         wealth = wealth_func(wealth_end, end, market, risk_free)
