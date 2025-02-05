@@ -1,9 +1,15 @@
 import pandas as pd
+import numpy as np
+import re
+import gc
 from pandas.tseries.offsets import MonthEnd
 import General_Functions as GF
 from pandas.tseries.offsets import MonthEnd
-from Main import settings, pf_set
-import numpy as np
+from Main import settings, features, pf_set
+from General_Functions import size_screen_fun, addition_deletion_fun
+from scipy.stats import rankdata
+
+
 
 def merge_rvol_data(file_path_usa, file_path_rvol_252):
     """
@@ -383,12 +389,209 @@ def load_and_prepare_data(file_path, features):
 
 
 
+#Prepare data, this is the chars dataframe and the daily dataframe
+# Plotfunktioner er her kommenteret ud
+
+def process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path):
+    """
+    Læs og processer 'chars' og 'daily' data og returner dem.
+
+    Parametre:
+      file_path_usa_test (str): Sti til Parquet-filen med USA-data (chars).
+      daily_file_path (str): Sti til Parquet-filen med daily-data.
+      file_path_world_ret (str): Sti til CSV-filen med world returns.
+      risk_free_path (str): Sti til CSV-filen med risk free data.
+      market_path (str): Sti til CSV-filen med market returns.
+
+    Returnerer:
+      tuple: (chars, daily)
+
+     # Eksempel på parametre (disse skal defineres i din kode)
+     file_path_usa_test = "./data_test/usa_test.parquet"
+     daily_file_path = "./data_test/usa_dsf_test.parquet"
+     file_path_world_ret = "./data_test/world_ret_test.csv"
+     risk_free_path = "./data_test/risk_free_test.csv"
+     market_path = "./data_test/market_returns_test.csv"
+
+
+    # Kald funktionen
+     chars, daily = process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
+    """
+    # ----- Processering af chars-data -----
+    desired_cols = ["id", "eom", "sic", "size_grp", "me", "rvol_252d", "dolvol_126d"] + features
+    actual_cols = pd.read_parquet(file_path_usa_test, engine="pyarrow").columns
+    cols_to_load = [col for col in desired_cols if col in actual_cols]
+    if not cols_to_load:
+        raise ValueError("Ingen af de ønskede kolonner findes i Parquet-filen.")
+
+    # Indlæs kun de kolonner, der findes
+    chars = pd.read_parquet(file_path_usa_test, engine="pyarrow", columns=cols_to_load)
+
+    # Filtrér observationer
+    chars = chars[chars["id"] <= 99999]
+
+    # Konverter datoformat for 'eom'
+    chars["eom"] = pd.to_datetime(chars["eom"], errors="coerce")
+
+    # Fjern eventuelle dubletter af kolonnenavne
+    chars = chars.loc[:, ~chars.columns.duplicated()]
+
+    # Kontrollér nødvendige kolonner
+    required_cols = ["dolvol_126d", "rvol_252d"]
+    for col in required_cols:
+        if col not in chars.columns:
+            raise KeyError(f"Kolonnen '{col}' mangler i DataFrame.")
+        if chars[col].isnull().any():
+            raise ValueError(f"Kolonnen '{col}' indeholder manglende værdier.")
+    if (chars["dolvol_126d"] == 0).any():
+        raise ValueError("Kolonnen 'dolvol_126d' indeholder værdier lig 0, hvilket vil føre til divisionsfejl.")
+
+    # Beregn afledte kolonner
+    pi = settings["pi"]
+    chars["dolvol"] = chars["dolvol_126d"]  # Kopiér dolvol_126d til dolvol
+    chars["lambda"] = 2 / chars["dolvol"] * pi  # Beregn lambda
+    chars["rvol_m"] = chars["rvol_252d"] * np.sqrt(21)  # Beregn rvol_m
+
+    # Process return-data: Indlæs og merge
+    data_ret_ld1 = process_return_data(file_path_world_ret, risk_free_path)
+    chars = chars.merge(data_ret_ld1, on=["id", "eom"], how="left")
+
+    market = load_and_filter_market_returns_test(market_path)
+    risk_free = process_risk_free_rate(risk_free_path)
+    wealth_end = pf_set["wealth"]
+    end = settings["split"]["test_end"]
+    wealth = wealth_func(wealth_end, end, market, risk_free)
+    # Forskyd 'eom' med en måned i wealth DataFrame
+    wealth["eom"] = wealth["eom"] + pd.offsets.MonthEnd(1)
+    wealth_subset = wealth[["eom", "mu_ld1"]].rename(columns={"mu_ld1": "mu_ld0"})
+    chars = chars.merge(wealth_subset, on="eom", how="left")
+
+    # Filtrer datoer baseret på screens
+    chars = chars[(chars["eom"] >= settings["screens"]["start"]) &
+                  (chars["eom"] <= settings["screens"]["end"])]
+
+    n_start = len(chars)
+    me_start = chars["me"].sum(skipna=True)
+    chars = chars.dropna(subset=["me"])
+    chars = chars.dropna(subset=["tr_ld0", "tr_ld1"])
+    chars = chars.dropna(subset=["dolvol"])
+    chars = chars[chars["dolvol"] > 0]
+    chars = chars.dropna(subset=["sic"])
+    chars = chars[chars["sic"] != ""]
+
+    # Screening baseret på feature-dækning
+    feat_available = chars[features].notna().sum(axis=1)
+    min_feat = int(len(features) * settings["screens"]["feat_pct"])
+    chars = chars[feat_available >= min_feat]
+
+    # (Valgfri) Sub-sampling
+    run_sub = False
+    if run_sub:
+        np.random.seed(settings["seed"])
+        sampled_ids = np.random.choice(chars["id"].unique(), 2500, replace=False)
+        chars = chars[chars["id"].isin(sampled_ids)]
+
+    # Feature percentil-rankering (ECDF) for hver feature
+    if settings["feat_prank"]:
+        chars[features] = chars[features].astype(float)
+        for i, f in enumerate(features, 1):
+            zero_mask = chars[f] == 0
+
+            def ecdf_transform(x):
+                non_na = x.dropna()
+                if len(non_na) == 0:
+                    return x
+                ranks = rankdata(non_na, method="average") / len(non_na)
+                rank_mapping = dict(zip(non_na, ranks))
+                return x.map(lambda v: rank_mapping.get(v, np.nan))
+
+            chars[f] = chars.groupby("eom")[f].transform(ecdf_transform)
+            chars.loc[zero_mask, f] = 0
+    if settings["feat_impute"]:
+        if settings["feat_prank"]:
+            chars[features] = chars[features].fillna(0.5)
+        else:
+            chars[features] = chars.groupby("eom")[features].transform(lambda x: x.fillna(x.median()))
+
+    # Defragmenter DataFrame
+    chars = chars.copy()
+    chars["sic"] = pd.to_numeric(chars["sic"], errors="coerce")
+
+    # Tildel brancher baseret på SIC
+    conditions = [
+        chars["sic"].between(100, 999) | chars["sic"].between(2000, 2399) | chars["sic"].between(2700, 2749) |
+        chars["sic"].between(2770, 2799) | chars["sic"].between(3100, 3199) | chars["sic"].between(3940, 3989),
+
+        chars["sic"].between(2500, 2519) | chars["sic"].between(3630, 3659) | chars["sic"].between(3710, 3711) |
+        chars["sic"].isin([3714, 3716]) | chars["sic"].between(3750, 3751) | chars["sic"].isin([3792]) |
+        chars["sic"].between(3900, 3939) | chars["sic"].between(3990, 3999),
+
+        chars["sic"].between(2520, 2589) | chars["sic"].between(2600, 2699) | chars["sic"].between(2750, 2769) |
+        chars["sic"].between(3000, 3099) | chars["sic"].between(3200, 3569) | chars["sic"].between(3580, 3629) |
+        chars["sic"].between(3700, 3709) | chars["sic"].between(3712, 3713) | chars["sic"].isin([3715]) |
+        chars["sic"].between(3717, 3749) | chars["sic"].between(3752, 3791) | chars["sic"].between(3793, 3799) |
+        chars["sic"].between(3830, 3839) | chars["sic"].between(3860, 3899),
+
+        chars["sic"].between(1200, 1399) | chars["sic"].between(2900, 2999),
+
+        chars["sic"].between(2800, 2829) | chars["sic"].between(2840, 2899),
+
+        chars["sic"].between(3570, 3579) | chars["sic"].between(3660, 3692) | chars["sic"].between(3694, 3699) |
+        chars["sic"].between(3810, 3829) | chars["sic"].between(7370, 7379),
+
+        chars["sic"].between(4800, 4899),
+
+        chars["sic"].between(4900, 4949),
+
+        chars["sic"].between(5000, 5999) | chars["sic"].between(7200, 7299) | chars["sic"].between(7600, 7699),
+
+        chars["sic"].between(2830, 2839) | chars["sic"].isin([3693]) | chars["sic"].between(3840, 3859) |
+        chars["sic"].between(8000, 8099),
+
+        chars["sic"].between(6000, 6999)
+    ]
+    choices = ["NoDur", "Durbl", "Manuf", "Enrgy", "Chems",
+               "BusEq", "Telcm", "Utils", "Shops", "Hlth", "Money"]
+    chars["ff12"] = np.select(conditions, choices, default="Other")
+
+    # Markér alle data som gyldige og sorter
+    chars = chars.copy()
+    chars["valid_data"] = True
+    chars = chars.sort_values(by=["id", "eom"]).copy()
+
+    # Lookback-beregninger
+    lb = pf_set["lb_hor"] + 1
+    chars["eom_lag"] = chars.groupby("id")["eom"].shift(lb)
+    chars["month_diff"] = ((chars["eom"] - chars["eom_lag"]).dt.days / 30.44).round().astype("Int64")
+    # Opdater valid_data: kræver at month_diff er lig med lb og ikke er NaN
+    chars["valid_data"] = chars["valid_data"] & (chars["month_diff"] == lb) & chars["month_diff"].notna()
+    chars.drop(columns=["eom_lag", "month_diff"], inplace=True)
+    del lb
+
+    # Kør ekstern screening: Size og addition/deletion
+    chars = size_screen_fun(chars, "all")
+    chars = addition_deletion_fun(chars, addition_n=settings["addition_n"], deletion_n=settings["deletion_n"])
+
+    # (Evt. investable universe plot og valid summary er udeladt her)
+
+    # ----- Processering af daily-data -----
+    daily = pd.read_parquet(daily_file_path)
+    valid_ids_daily = chars.loc[chars['valid'] == True, 'id'].unique()
+    daily = daily[
+        daily['ret_exc'].notna() &
+        (daily['id'] <= 99999) &
+        (daily['id'].isin(valid_ids_daily))
+        ]
+    gc.collect()
+    daily['date'] = pd.to_datetime(daily['date'], format='%Y-%m-%d', errors='coerce')
+    gc.collect()
+    daily['eom'] = daily['date'] + pd.offsets.MonthEnd(0)
+
+    return chars, daily
 
 
 
-
-
-# last one - load dauly returns from usa_dsf_test
+# last one - load dauly returns from usa_dsf_test, i think we are gonna delete this function
 def prepare_daily_returns(file_path, data):
     """
     Forbereder daglige afkastdata.
