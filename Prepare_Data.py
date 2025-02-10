@@ -159,16 +159,11 @@ def process_cluster_labels(file_path_cluster_labels, file_path_factor_details):
     - openpyxl skal være installeret for at kunne læse Excel-filen.
       Installer med: `pip install openpyxl`
 
-    Eksempel:
-    # file_path_cluster_labels = "./Data/Cluster Labels.csv"
-    # file_path_factor_details = "./Data/Factor Details.xlsx"
 
-    # Brug funktionen som følger:
-    #rente_path = "Data/ff3_m.csv"
-    #risk_free = process_risk_free_rate(rente_path)
-    #h_list = [1,2]
-    #file_path_usa = "Data/usa.parquet"
-    #result = monthly_returns(risk_free=risk_free, h_list=h_list, file_path=file_path_usa)
+    #Eksempel på brug af funktionen:
+    file_path_cluster_labels = "Data/Cluster Labels.csv"
+    file_path_factor_details = "Data/Factor Details.xlsx"
+    cluster_labels = process_cluster_labels(file_path_cluster_labels, file_path_factor_details)
 
     Returnerer:
     - pd.DataFrame: En opdateret DataFrame med de transformerede data.
