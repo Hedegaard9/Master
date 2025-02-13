@@ -5,8 +5,25 @@ from pandas.tseries.offsets import MonthEnd
 from Prepare_Data import process_risk_free_rate, process_return_data, wealth_func, load_and_filter_market_returns_test, process_all_data, process_cluster_labels
 from General_Functions import size_screen_fun, addition_deletion_fun
 import statsmodels.formula.api as smf
+import sys
+import importlib
+ewma = importlib.import_module("ewma")
 
+import pandas as pd
+import matplotlib.pyplot as plt
+from General_Functions import long_horizon_ret
+from Main import settings, features, pf_set
+from pandas.tseries.offsets import MonthEnd
+from Prepare_Data import process_risk_free_rate, process_return_data, wealth_func, load_and_filter_market_returns_test, process_all_data, process_cluster_labels
+from General_Functions import size_screen_fun, addition_deletion_fun
 
+import numpy as np
+from scipy.stats import rankdata
+import re
+import gc
+import ewma
+
+import statsmodels.formula.api as smf
 
 #New version:
 
@@ -242,67 +259,57 @@ def unnest_spec_risk(fct_ret_est):
     return spec_risk
 
 
-def ewma_variance(x, lambda_, start):
+def calculate_ewma(spec_risk, settings):
     """
-    Beregner EWMA-variance (og volatilitet) for en 1-dimensionel array eller pd.Series 'x'.
-    Forudsætter, at middelværdien er 0.
+    Beregner EWMA-volatilitet per gruppe i en DataFrame.
 
-    Parametre:
-      - x: En 1-dimensionel array eller pd.Series med residualer.
-      - lambda_: Vægtningsparameteren (0 < lambda_ < 1). Typisk beregnet som 0.5**(1/hl_stock_var).
-      - start: Antallet af observationer, der skal bruges til initial beregning af varians.
+    Args:
+        spec_risk (pd.DataFrame): DataFrame med kolonnerne 'id' og 'res'.
+        settings (dict): Dictionary med 'cov_set' indeholdende 'hl_stock_var' og 'initial_var_obs'.
 
-    Returnerer:
-      - En numpy-array med volatilitet (dvs. kvadratroden af variansen) for hver observation.
+    Returns:
+        pd.DataFrame: Opdateret DataFrame med en ny kolonne 'res_vol'.
+
+    Example:
+    spec_risk_res_vol = calculate_ewma(spec_risk,settings)
+    spec_risk_res_vol
     """
-    x = np.asarray(x)  # sikre at vi arbejder med en numpy-array
-    n = len(x)
-    var_vec = np.full(n, np.nan)  # initialiserer en array med NaN
 
-    # Hvis der ikke er nok observationer, returneres en array med NaN
-    if n < start:
-        return var_vec
+    lambda_val = 0.5 ** (1.0 / settings['cov_set']['hl_stock_var'])
+    start_val = settings['cov_set']['initial_var_obs']
 
-    # Beregn initial varians baseret på de første 'start' observationer (med antaget middelværdi 0)
-    na_count = 0
-    initial_sum = 0.0
-    for i in range(start):
-        if np.isnan(x[i]):
-            na_count += 1
-        else:
-            initial_sum += x[i] ** 2
-    denominator = start - 1 - na_count
-    if denominator <= 0:
-        initial_value = np.nan
-    else:
-        initial_value = initial_sum / denominator
+    def apply_ewma(group):
+        group = group.copy()  # Sikrer, at vi ikke ændrer originalen
+        group['res_vol'] = ewma.ewma_c(group['res'].values, lambda_val, start_val)
+        return group
 
-    # Sæt den første beregnede varians på position 'start - 1'
-    var_vec[start - 1] = initial_value
-
-    # Iterativ opdatering af EWMA-variansen for de efterfølgende observationer
-    for j in range(start, n):
-        if np.isnan(x[j - 1]):
-            var_vec[j] = var_vec[j - 1]
-        else:
-            var_vec[j] = lambda_ * var_vec[j - 1] + (1 - lambda_) * (x[j - 1] ** 2)
-
-    # Returner volatiliteten (kvadratroden af variansen)
-    return np.sqrt(var_vec)
+    # Anvend EWMA per gruppe og returner den opdaterede DataFrame
+    return spec_risk.groupby('id', group_keys=False, as_index=False).apply(apply_ewma)
 
 
+#Indhenter chars og daily:
+file_path_usa_test = "./data_test/usa_test.parquet"
+daily_file_path = "./data_test/usa_dsf_test.parquet"
+file_path_world_ret = "./data_test/world_ret_test.csv"
+risk_free_path = "./data_test/risk_free_test.csv"
+market_path = "./data_test/market_returns_test.csv"
 
 
+file_path_cluster_labels = "Data/Cluster Labels.csv"
+file_path_factor_details = "Data/Factor Details.xlsx"
+
+# Kald funktionen
+chars, daily = process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
+
+cluster_data_d, ind_factors, clusters = process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
+
+fct_ret_est = run_regressions_by_date(cluster_data_d, ind_factors, clusters)
+
+fct_ret = create_factor_returns(fct_ret_est)
+
+spec_risk = unnest_spec_risk(fct_ret_est)
+print(spec_risk)
 
 
-
-
-
-
-
-
-
-
-
-
-
+spec_risk_res_vol = calculate_ewma(spec_risk,settings)
+print(spec_risk_res_vol)
