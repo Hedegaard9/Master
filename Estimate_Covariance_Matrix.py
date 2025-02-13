@@ -4,6 +4,7 @@ from Main import settings, features, pf_set
 from pandas.tseries.offsets import MonthEnd
 from Prepare_Data import process_risk_free_rate, process_return_data, wealth_func, load_and_filter_market_returns_test, process_all_data, process_cluster_labels
 from General_Functions import size_screen_fun, addition_deletion_fun
+import statsmodels.formula.api as smf
 
 
 
@@ -288,3 +289,20 @@ def ewma_variance(x, lambda_, start):
 
     # Returner volatiliteten (kvadratroden af variansen)
     return np.sqrt(var_vec)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
