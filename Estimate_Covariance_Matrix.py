@@ -8,12 +8,11 @@ import statsmodels.formula.api as smf
 import sys
 import importlib
 ewma = importlib.import_module("ewma")
-
+#sqrtm_cpp = importlib.import_module("sqrtm_cpp")
 import pandas as pd
 import matplotlib.pyplot as plt
 from General_Functions import long_horizon_ret
 from Main import settings, features, pf_set
-from pandas.tseries.offsets import MonthEnd
 from Prepare_Data import process_risk_free_rate, process_return_data, wealth_func, load_and_filter_market_returns_test, process_all_data, process_cluster_labels
 from General_Functions import size_screen_fun, addition_deletion_fun
 
@@ -40,11 +39,14 @@ def process_cluster_data(chars, daily, cluster_labels_path, factor_details_path)
 
     Returnerer:
     - cluster_data_d: Behandlet DataFrame med alle transformationer
+    - ind_factors: Liste med industry/market faktorer
+    - clusters: Liste over clusters
+    - cluster_data_m: DataFrame med de mellemliggende data (før merging med daglige data)
 
     Eksempel på brug:
     file_path_cluster_labels = "Data/Cluster Labels.csv"
     file_path_factor_details = "Data/Factor Details.xlsx"
-    cluster_data_d, ind_factors, clusters = process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
+    cluster_data_d, ind_factors, clusters, cluster_data_m = process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
     """
 
     # Indlæs cluster labels separat (bruger samme metode som i den anden version)
@@ -88,10 +90,10 @@ def process_cluster_data(chars, daily, cluster_labels_path, factor_details_path)
         industries = sorted(cluster_data_m["ff12"].unique())
         for ind in industries:
             cluster_data_m[str(ind)] = (cluster_data_m["ff12"] == ind).astype(int)
-        ind_factors = industries # vi bruger ik den her?
+        ind_factors = industries  # vi bruger ikke denne her?
     else:
         cluster_data_m["mkt"] = 1
-        ind_factors = ["mkt"] # vi bruger ik den her?
+        ind_factors = ["mkt"]  # vi bruger ikke denne her?
 
     # Standardiser faktorer per eom (Bruger samme metode som den anden version)
     cluster_data_m[clusters] = cluster_data_m.groupby("eom")[clusters].transform(lambda x: (x - x.mean()) / x.std())
@@ -107,7 +109,8 @@ def process_cluster_data(chars, daily, cluster_labels_path, factor_details_path)
     # Fjern manglende værdier
     cluster_data_d.dropna(inplace=True)
 
-    return cluster_data_d, ind_factors, clusters
+    return cluster_data_d, ind_factors, clusters, cluster_data_m
+
 
 # Create factor returns --------------------
 
@@ -210,6 +213,137 @@ def create_factor_returns(fct_ret_est):
 
 # Factor Risk -----------------------------
 
+def weighted_cov(
+        df: pd.DataFrame,
+        weights: np.ndarray,
+        correlation: bool = False,
+        center: bool = True,
+        unbiased: bool = True
+) -> np.ndarray:
+    """
+    Tilsvarende en 'cov.wt' i R, der kan returnere enten en kovarians- eller korrelationsmatrix.
+
+    Parametre:
+    - df: DataFrame med observationsrækker og faktorkolonner (ingen 'date'-kolonne).
+    - weights: Numpy-array med vægte (samme længde som df).
+    - correlation: Hvis True, returneres en korrelationsmatrix. Ellers en kovariansmatrix.
+    - center: Hvis True, fratrækkes det vægtede gennemsnit af hver kolonne.
+    - unbiased: Hvis True, bruger vi (sum(weights) - 1) i nævneren, ellers sum(weights).
+
+    Returnerer:
+    - Et numpy 2D-array med kovarians- eller korrelationsmatricen.
+    """
+    if len(df) != len(weights):
+        raise ValueError("Antal rækker i df skal matche længden af weights.")
+
+    # Summer af vægte
+    w_sum = weights.sum()
+
+    # (Evt.) fratræk vægtet gennemsnit
+    if center:
+        w_mean = np.average(df, axis=0, weights=weights)
+    else:
+        w_mean = np.zeros(df.shape[1])
+
+    # Center data
+    X_centered = df - w_mean
+
+    expanded_weights = weights[:, np.newaxis]
+    numerator = (X_centered.values * expanded_weights).T @ X_centered.values
+
+    if unbiased:
+        denominator = w_sum - 1
+    else:
+        denominator = w_sum
+
+    # Kovariansmatrix
+    cov_mat = numerator / denominator
+
+    # Hvis vi vil have korrelationsmatrix, normaliserer vi med standardafvigelserne
+    if correlation:
+        std_diag = np.sqrt(np.diag(cov_mat))
+        # Undgå division med 0, fx hvis en faktor har 0-variance
+        with np.errstate(divide='ignore', invalid='ignore'):
+            corr_mat = cov_mat / np.outer(std_diag, std_diag)
+            np.fill_diagonal(corr_mat, 1.0)  # sæt diagonalen til 1
+        return corr_mat
+    else:
+        return cov_mat
+
+
+def factor_cov_estimate(calc_dates, fct_dates, fct_ret, w_cor, w_var, settings):
+    """
+    Genskaber logikken fra R-koden:
+      - For hver dato d i calc_dates:
+          1. Find det tidligste tidspunkt (first_obs) i det rullende vindue
+          2. Filtrer fct_ret til kun at indeholde data mellem first_obs og d
+          3. Beregn vægtet korrelationsmatrix (cor_est) og vægtet variansmatrix (var_est)
+          4. Kombiner dem til en endelig kovariansmatrix
+          5. Returnér en dict eller liste af kovariansmatricer (én pr. dato)
+    """
+    factor_cov_est = {}
+
+    for d in calc_dates:
+        # 1) Find det rullende vindue for dato d
+        #    (forudsat at fct_dates er en liste/array af datotidspunkter)
+        valid_fct_dates = [fd for fd in fct_dates if fd <= d]
+        # Tag de seneste 'obs' antal datoer
+        tail_fct_dates = valid_fct_dates[-settings["cov_set"]["obs"]:]
+
+        # Hvis der ikke er nok data i starten, kan det give fejl
+        if not tail_fct_dates:
+            print(f"Advarsel: Ingen tilgængelige datoer for {d}")
+            continue
+
+        first_obs = min(tail_fct_dates)
+
+        # 2) Filtrer data til vinduet [first_obs, d]
+        #    fct_ret antages at være en DataFrame med en 'date'-kolonne
+        cov_data = fct_ret[(fct_ret["date"] >= first_obs) & (fct_ret["date"] <= d)]
+        t = len(cov_data)
+
+        # Tjek om der er nok observationer
+        if t < settings["cov_set"]["obs"] - 30:
+            print("WARNING: INSUFFICIENT NUMBER OF OBSERVATIONS!!")
+
+        # 3) Beregn vægtet korrelation og varians
+        #    - w_cor_t og w_var_t er de sidste t vægte (ligesom tail(w_cor, t))
+        w_cor_t = w_cor[-t:]
+        w_var_t = w_var[-t:]
+
+        # Kolonnerne med faktorer (antager at alt undtagen 'date' er faktorer)
+        factor_cols = [col for col in cov_data.columns if col != "date"]
+
+        cor_est = weighted_cov(
+            df=cov_data[factor_cols],
+            weights=w_cor_t,
+            correlation=True,
+            center=True,
+            unbiased=True
+        )
+
+        var_est = weighted_cov(
+            df=cov_data[factor_cols],
+            weights=w_var_t,
+            correlation=False,
+            center=True,
+            unbiased=True
+        )
+
+        # 4) Kombinér til en endelig kovariansmatrix
+        sd_diag = np.diag(np.sqrt(np.diag(var_est)))
+        cov_est = sd_diag @ cor_est @ sd_diag
+
+        # Læg i en DataFrame for navngivne rækker og kolonner
+        cov_est_df = pd.DataFrame(cov_est, index=factor_cols, columns=factor_cols)
+
+        # 5) Gem resultatet i et dictionary, keyed af dato d
+        factor_cov_est[d] = cov_est_df
+
+    return factor_cov_est
+
+# Specific Risk ---------------------------
+
 def unnest_spec_risk(fct_ret_est):
     """
     Udpakker de nestede 'id' og 'res'-lister i fct_ret_est.
@@ -287,29 +421,42 @@ def calculate_ewma(spec_risk, settings):
     return spec_risk.groupby('id', group_keys=False, as_index=False).apply(apply_ewma)
 
 
-#Indhenter chars og daily:
-file_path_usa_test = "./data_test/usa_test.parquet"
-daily_file_path = "./data_test/usa_dsf_test.parquet"
-file_path_world_ret = "./data_test/world_ret_test.csv"
-risk_free_path = "./data_test/risk_free_test.csv"
-market_path = "./data_test/market_returns_test.csv"
+def main():
+    # Indhenter chars og daily:
+    file_path_usa_test = "./data_test/usa_test.parquet"
+    daily_file_path = "./data_test/usa_dsf_test.parquet"
+    file_path_world_ret = "./data_test/world_ret_test.csv"
+    risk_free_path = "./data_test/risk_free_test.csv"
+    market_path = "./data_test/market_returns_test.csv"
+
+    file_path_cluster_labels = "Data/Cluster Labels.csv"
+    file_path_factor_details = "Data/Factor Details.xlsx"
+
+    # Kald funktionerne
+    chars, daily = process_all_data(
+        file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path
+    )
+
+    # Hvis du ikke har brug for den fjerde returnerede værdi, kan du bruge en underscore
+    cluster_data_d, ind_factors, clusters, cluster_data_m  = process_cluster_data(
+        chars, daily, file_path_cluster_labels, file_path_factor_details
+    )
+
+    fct_ret_est = run_regressions_by_date(cluster_data_d, ind_factors, clusters)
+    fct_ret = create_factor_returns(fct_ret_est)
+
+    w_cor = (0.5 ** (1 / settings['cov_set']['hl_cor'])) ** np.arange(settings['cov_set']['obs'], 0, -1)
+    w_var = (0.5 ** (1 / settings['cov_set']['hl_var'])) ** np.arange(settings['cov_set']['obs'], 0, -1)
+
+    fct_dates = np.sort(fct_ret["date"].unique())
+    min_calc_date = fct_dates[settings["cov_set"]["obs"] - 1] - pd.DateOffset(months=1)
+    calc_dates = np.sort(cluster_data_m.loc[cluster_data_m["eom"] >= min_calc_date, "eom"].unique())
+
+    factor_cov_dict = factor_cov_estimate(calc_dates, fct_dates, fct_ret, w_cor, w_var, settings)
+
+    spec_risk = unnest_spec_risk(fct_ret_est)
+    spec_risk_res_vol = calculate_ewma(spec_risk, settings)
 
 
-file_path_cluster_labels = "Data/Cluster Labels.csv"
-file_path_factor_details = "Data/Factor Details.xlsx"
-
-# Kald funktionen
-chars, daily = process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
-
-cluster_data_d, ind_factors, clusters = process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
-
-fct_ret_est = run_regressions_by_date(cluster_data_d, ind_factors, clusters)
-
-fct_ret = create_factor_returns(fct_ret_est)
-
-spec_risk = unnest_spec_risk(fct_ret_est)
-print(spec_risk)
-
-
-spec_risk_res_vol = calculate_ewma(spec_risk,settings)
-print(spec_risk_res_vol)
+if __name__ == "__main__":
+    main()
