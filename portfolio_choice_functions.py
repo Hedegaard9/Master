@@ -1,21 +1,38 @@
 import numpy as np
 import pandas as pd
 from scipy.linalg import sqrtm
+import importlib
+sqrtm_cpp = importlib.import_module("sqrtm_cpp")
 
 # Funktion til beregning af M
-def m_func(w, mu, rf, sigma_gam, gam, lambda_matrix, iterations):
-    n = lambda_matrix.shape[0]
+def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter):
+    n = lambda_mat.shape[0]
     g_bar = np.ones(n)
     mu_bar_vec = np.ones(n) * (1 + rf + mu)
-    sigma_gr = (1 + rf + mu)**-2 * (np.outer(mu_bar_vec, mu_bar_vec) + sigma_gam / gam)
-    lamb_neg05 = np.diag(np.diag(lambda_matrix)**-0.5)
-    x = w**-1 * lamb_neg05 @ sigma_gam @ lamb_neg05
+
+    # Beregning af sigma_gr
+    sigma_gr = (1 + rf + mu) ** -2 * (np.outer(mu_bar_vec, mu_bar_vec) + sigma_gam / gam)
+
+    # Beregning af lambda^(-0.5), da lambda er diagonal
+    lamb_neg05 = np.diag(np.diag(lambda_mat) ** -0.5)
+
+    # Placeholder for x
+    x = w ** -1 * lamb_neg05 @ sigma_gam @ lamb_neg05
     y = np.diag(1 + np.diag(sigma_gr))
+
+    # Iteration på F
     sigma_hat = x + np.diag(1 + g_bar)
-    m_tilde = 0.5 * (sigma_hat - sqrtm(sigma_hat @ sigma_hat - 4 * np.eye(n)))
-    for _ in range(iterations):
-        m_tilde = np.linalg.inv(x + y - m_tilde @ sigma_gr)
-    return lamb_neg05 @ m_tilde @ np.sqrt(lambda_matrix)
+
+    # Brug C++-implementering af sqrtm, og tag realdelen
+    sqrt_term = np.real(sqrtm_cpp.sqrtm_cpp(sigma_hat @ sigma_hat - 4 * np.eye(n)))
+
+    m_tilde = 0.5 * (sigma_hat - sqrt_term)
+    for _ in range(iter):
+        m_tilde = np.linalg.inv(x + y - m_tilde * sigma_gr)  # Elementvis multiplikation
+
+    # Output: Beregn elementvis kvadratrod af lambda
+    return lamb_neg05 @ m_tilde @ np.diag(np.sqrt(np.diag(lambda_mat)))
+
 
 # Statisk M
 def m_static(sigma_gam, w, lambda_matrix, phi):
