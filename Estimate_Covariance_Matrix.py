@@ -6,6 +6,8 @@ from Prepare_Data import process_risk_free_rate, process_return_data, wealth_fun
 from General_Functions import size_screen_fun, addition_deletion_fun
 import statsmodels.formula.api as smf
 import sys
+from math import sqrt
+from tqdm import tqdm
 import importlib
 ewma = importlib.import_module("ewma")
 #sqrtm_cpp = importlib.import_module("sqrtm_cpp")
@@ -15,7 +17,7 @@ from General_Functions import long_horizon_ret
 from Main import settings, features, pf_set
 from Prepare_Data import process_risk_free_rate, process_return_data, wealth_func, load_and_filter_market_returns_test, process_all_data, process_cluster_labels
 from General_Functions import size_screen_fun, addition_deletion_fun
-
+from plotnine import ggplot, aes, geom_point, labs, theme, element_blank
 import numpy as np
 from scipy.stats import rankdata
 import re
@@ -23,7 +25,6 @@ import gc
 import ewma
 
 import statsmodels.formula.api as smf
-
 #New version:
 
 def process_cluster_data(chars, daily, cluster_labels_path, factor_details_path):
@@ -421,6 +422,276 @@ def calculate_ewma(spec_risk, settings):
     return spec_risk.groupby('id', group_keys=False, as_index=False).apply(apply_ewma)
 
 
+def process_spec_risk_m(fct_dates, spec_risk):
+    """
+    Transformerer spec_risk-dataene og returnerer to DataFrames:
+
+    1. spec_risk_m: Indeholder for hver id og eom (sidste dag i måneden) den seneste dato samt res_vol.
+    2. spec_risk_res_vol: Den transformerede og filtrerede DataFrame.
+
+    Parametre:
+      fct_dates : array-lignende objekt med datoer.
+      spec_risk : DataFrame med kolonnerne 'id', 'date' og 'res_vol'.
+
+    Returnerer:
+      spec_risk_m, spec_risk_res_vol : To DataFrames.
+
+    Example:
+    spec_risk_m, spec_risk_res_vol = process_spec_risk_m(fct_dates, spec_risk_res_vol)
+    """
+    # 1. Opret td_range med en lagget kolonne på 252 dage
+    td_range = pd.DataFrame({"date": fct_dates})
+    td_range["td_252d"] = td_range["date"].shift(252)
+
+    # 2. Merge spec_risk med td_range baseret på "date"
+    spec_risk_res_vol = spec_risk.merge(td_range, on="date", how="left")
+
+    # 3. Opret "date_200d" som lag 200 inden for hver id-gruppe
+    spec_risk_res_vol["date_200d"] = spec_risk_res_vol.groupby("id")["date"].shift(200)
+
+    # 4. Filtrer efter betingelserne: date_200d >= td_252d og res_vol er ikke NaN
+    spec_risk_res_vol = spec_risk_res_vol[
+        (spec_risk_res_vol["date_200d"] >= spec_risk_res_vol["td_252d"]) &
+        (~spec_risk_res_vol["res_vol"].isna())
+        ]
+    spec_risk_res_vol = spec_risk_res_vol[["id", "date", "res_vol"]]
+
+    # 5. Beregn eom_ret (sidste dag i måneden)
+    spec_risk_res_vol["eom_ret"] = (spec_risk_res_vol["date"] + pd.offsets.MonthBegin(1)) - pd.Timedelta(days=1)
+
+    # 6. Find den maksimale dato for hver kombination af id og eom_ret
+    spec_risk_res_vol["max_date"] = spec_risk_res_vol.groupby(["id", "eom_ret"])["date"].transform("max")
+
+    # 7. Filtrer kun rækker hvor datoen er max_date, og behold de relevante kolonner
+    spec_risk_m = spec_risk_res_vol[spec_risk_res_vol["date"] == spec_risk_res_vol["max_date"]][
+        ["id", "eom_ret", "res_vol"]]
+    spec_risk_m = spec_risk_m.rename(columns={"eom_ret": "eom"})
+
+    return spec_risk_m, spec_risk_res_vol
+
+
+def calculate_barra_cov(calc_dates, cluster_data_m, spec_risk_m, factor_cov_est):
+    """
+    Beregner stock covariance matrix for hver dato i calc_dates.
+
+    For hver dato d foretages følgende:
+      1. Filtrering af cluster_data_m for rækker, hvor 'eom' matcher d.
+      2. Merge med spec_risk_m på kolonnerne 'id' og 'eom' for at tilføje specific risk.
+      3. Beregning af median specific risk (res_vol) for grupper defineret af 'size_grp' og 'eom'.
+      4. Hvis der mangler median, beregnes median for grupper defineret af 'eom' og manglende værdier udfyldes.
+      5. Manglende værdier i 'res_vol' erstattes med den beregnede median.
+      6. Den faktor-kovariansmatrix, der hentes fra factor_cov_est for datoen, annualiseres ved at gange med 21.
+      7. Data sorteres efter 'id', og de kolonner, som svarer til kolonnenavnene i fct_cov, udvælges til at danne faktorbelastningsmatricen X.
+      8. Den individuelle varians (ivol_vec) beregnes som res_vol^2 * 21 (annualiseret).
+
+    Returnerer en dictionary, hvor nøglerne er datoerne (som strings i formatet "YYYY-MM-DD"),
+    og værdien for hver dato er en dictionary med:
+      - "fct_load": Faktorbelastningsmatrix (som en DataFrame med 'id' som index)
+      - "fct_cov": Faktor-kovariansmatrix (annualiseret)
+      - "ivol_vec": En pandas Series med den annualiserede idiosynkratiske varians, indekseret med 'id'.
+
+    Forskel fra R-kode:
+        R:
+        Outputtet bliver ofte vist kompakt og overskueligt – fx vises en liste med en navngiven vektor,
+        hvor antallet af decimaltal og rækker som standard kan være begrænset.
+
+    Python (Pandas):
+        Outputtet vises som en dictionary med DataFrames og Series, hvor hele datasættet ofte vises.
+        Det betyder, at du kan få et meget mere detaljeret og "råt" output, med alle kolonner og rækker.
+
+    Example:
+    result = calculate_barra_cov(calc_dates, cluster_data_m, spec_risk_m, factor_cov_est)
+    #For tjek af resultatet kan man med fordel skrive:
+    print(barra_cov["2023-10-31"]["ivol_vec"])
+    """
+    # Sørg for, at 'eom'-kolonnerne i cluster_data_m og spec_risk_m er af datetime-type
+    cluster_data_m['eom'] = pd.to_datetime(cluster_data_m['eom'])
+    spec_risk_m['eom'] = pd.to_datetime(spec_risk_m['eom'])
+
+    # Konverter nøglerne i factor_cov_est til strenge med formatet "YYYY-MM-DD"
+    factor_cov_est_str = {pd.to_datetime(k).strftime('%Y-%m-%d'): v for k, v in factor_cov_est.items()}
+
+    barra_cov = {}
+
+    for d in tqdm(calc_dates, desc="Processerer datoer"):
+        # Sørg for, at d er en datetime
+        d_date = pd.to_datetime(d)
+        # Konverter d til den ønskede nøgle (fx "2022-01-31")
+        d_key = d_date.strftime('%Y-%m-%d')
+
+        # 1. Filtrér cluster_data_m for de rækker, hvor 'eom' matcher d_date
+        char_data = cluster_data_m[cluster_data_m['eom'] == d_date].copy()
+
+        # 2. Merge med spec_risk_m på 'id' og 'eom' for at tilføje specific risk
+        char_data = pd.merge(char_data, spec_risk_m, on=['id', 'eom'], how='left')
+
+        # 3. Beregn median for res_vol for grupper defineret af 'size_grp' og 'eom'
+        char_data['med_res_vol'] = char_data.groupby(['size_grp', 'eom'])['res_vol'].transform('median')
+
+        # 4. Hvis der mangler median (NA), beregn median for grupper defineret af 'eom'
+        if char_data['med_res_vol'].isna().any():
+            char_data['med_res_vol_all'] = char_data.groupby('eom')['res_vol'].transform('median')
+            char_data['med_res_vol'] = char_data['med_res_vol'].fillna(char_data['med_res_vol_all'])
+
+        # 5. Erstat NA i res_vol med den beregnede median (med_res_vol)
+        char_data['res_vol'] = char_data['res_vol'].fillna(char_data['med_res_vol'])
+
+        # 6. Hent faktor-kovariansmatrixen for d og annualiser (ganger med 21)
+        if d_key not in factor_cov_est_str:
+            raise KeyError(f"Dato {d_key} ikke fundet i factor_cov_est.")
+        fct_cov = factor_cov_est_str[d_key] * 21
+
+        # 7. Sorter char_data efter 'id' for at sikre alignment
+        char_data.sort_values(by='id', inplace=True)
+
+        # Udvælg de kolonner, der svarer til kolonnenavnene i fct_cov
+        if hasattr(fct_cov, 'columns'):
+            factor_cols = list(fct_cov.columns)
+        else:
+            raise ValueError("fct_cov skal have attributten 'columns'.")
+
+        # Udtræk faktorbelastningerne og omdann til en numpy-matrix
+        X = char_data[factor_cols].to_numpy()
+        # Lav en DataFrame med 'id' som index, så rækkefølgen stemmer overens
+        fct_load = pd.DataFrame(X, index=char_data['id'].astype(str), columns=factor_cols)
+
+        # 8. Beregn den annualiserede individuelle varians (ivol_vec)
+        ivol_vec = (char_data['res_vol'] ** 2) * 21
+        ivol_vec.index = char_data['id'].astype(str)
+
+        # Gem resultatet for den aktuelle dato i dictionary'en
+        barra_cov[d_key] = {"fct_load": fct_load, "fct_cov": fct_cov, "ivol_vec": ivol_vec}
+
+    return barra_cov
+
+
+def run_sanity_checks(run_checks, calc_dates, cluster_data_m, spec_risk_m, barra_cov, chars):
+    if not run_checks:
+        print("Sanity checks are disabled. Set run_checks=True to execute.")
+        return None
+    """
+    # Eksempel på anvendelse:
+    # results = run_sanity_checks(True, calc_dates, cluster_data_m, spec_risk_m, barra_cov, chars)
+    # results["missing_values_plot"].show()
+    # results["num_stocks_plot"].show()
+    # results["volatility_plot"].show()
+    # results["market_volatility_plot"].show()
+    # print(results["valid_count"])
+    """
+
+    print("Running sanity checks...")
+
+    # Why we impute: Antal manglende res_vol værdier pr. dato
+    rows = []
+    for d in calc_dates:
+        char_data = cluster_data_m[cluster_data_m["eom"] == d].copy()
+        char_data = char_data.merge(spec_risk_m, on=["id", "eom"], how="left")
+        n_miss = char_data["res_vol"].isna().sum()
+        rows.append({"eom": d, "n_miss": n_miss})
+
+    test = pd.DataFrame(rows)
+
+    # Plot missing values over time
+    p_missing = (ggplot(test, aes(x="eom", y="n_miss"))
+                 + geom_point()
+                 + labs(x="End of Month", y="Number of Missing res_vol"))
+
+    # Sanity check: Beregn diagonal-elementer fra fct_cov
+    rows = []
+    for d, data in barra_cov.items():
+        num_stocks = len(data["fct_load"])  # Brug aktier i stedet for faktorer!
+        pred_var = np.diag(data["fct_cov"].values)  # Udtræk diagonalen af kovariansmatricen
+        sd_avg = np.sqrt(np.mean(pred_var) * 252)  # Annualiseret volatilitet
+        rows.append({"eom": pd.to_datetime(d), "n": num_stocks, "sd_avg": sd_avg})
+
+    pred_sd_avg = pd.DataFrame(rows)
+
+    # Plot antal stocks pr. måned
+    p_n = (ggplot(pred_sd_avg, aes(x="eom", y="n"))
+           + geom_point(size=1)
+           + theme(axis_title_x=element_blank()))
+
+    # Plot gennemsnitlig estimeret volatilitet
+    p_sd_avg = (ggplot(pred_sd_avg, aes(x="eom", y="sd_avg"))  # Rettet variabelnavn
+                + geom_point(size=1)
+                + labs(y="Average Predicted Volatility (Annualized)", title="Covariance Sanity Check")
+                + theme(axis_title_x=element_blank()))
+
+    # Beregn markedets vægtede volatilitet baseret på "me"
+    me = chars.dropna(subset=["me"])[["id", "eom", "me"]].copy()
+    me = me.sort_values(by="eom")
+    me_grouped = {date: group for date, group in me.groupby("eom")}
+
+    rows = []
+    for d, data in barra_cov.items():
+        fct_load = data["fct_load"]
+        fct_cov = data["fct_cov"]
+
+        # Beregn aktie-kovariansmatrix
+        stock_cov_matrix = fct_load @ fct_cov @ fct_load.T
+
+        me_sub = me_grouped.get(pd.to_datetime(d), None)
+
+        if me_sub is None or me_sub.empty:
+            continue
+
+        me_sub["id"] = me_sub["id"].astype(str)
+        stock_cov_matrix.index = stock_cov_matrix.index.astype(str)
+        stock_cov_matrix.columns = stock_cov_matrix.columns.astype(str)
+
+        me_sub = me_sub[me_sub["id"].isin(stock_cov_matrix.columns)]
+
+        if me_sub.empty or stock_cov_matrix.empty:
+            continue  # Spring over hvis ingen matchende data
+
+        me_sub["w"] = me_sub["me"] / me_sub["me"].sum()
+
+        sigma_sub = stock_cov_matrix.loc[me_sub["id"], me_sub["id"]]
+
+        if sigma_sub.empty:
+            continue  # Spring over hvis ingen matchende data
+
+        mkt_vol = np.sqrt(me_sub["w"].values @ sigma_sub.values @ me_sub["w"].values.T)
+        rows.append({"eom": pd.to_datetime(d), "mkt_vol": mkt_vol})
+
+    mkt_vol_df = pd.DataFrame(rows)
+
+    # Plot markedets vægtede volatilitet
+    p_mkt_vol = (ggplot(mkt_vol_df, aes(x="eom", y="mkt_vol * np.sqrt(252)"))
+                 + geom_point()
+                 + labs(y="Market Volatility (Annualized)")
+                 + theme(axis_title_x=element_blank()))
+
+    # Valider gyldige aktier med en kovariansestimat
+    rows = []
+    for d, data in barra_cov.items():
+        ids = list(data["fct_load"].index.astype(str))  # Konverter til str
+
+        for id in ids:
+            rows.append({"eom": pd.to_datetime(d), "id": id, "valid_cov": True})
+
+    valid_cov_est = pd.DataFrame(rows)
+
+    # Sørg for, at 'id' i chars også er en string, så vi kan merge uden fejl
+    chars["id"] = chars["id"].astype(str)
+
+    # Merge for at tjekke gyldige estimater
+    test = valid_cov_est.merge(chars[["id", "eom", "valid"]], on=["id", "eom"], how="left")
+    valid_count = test[(test["valid"] == True) & (test["eom"] >= valid_cov_est["eom"].min())].groupby(
+        "valid_cov").size()
+
+    # Returnér plots og valideringstabel
+    return {
+        "missing_values_plot": p_missing,
+        "num_stocks_plot": p_n,
+        "volatility_plot": p_sd_avg,
+        "market_volatility_plot": p_mkt_vol,
+        "valid_count": valid_count
+    }
+
+
+
+
 def main():
     # Indhenter chars og daily:
     file_path_usa_test = "./data_test/usa_test.parquet"
@@ -452,10 +723,16 @@ def main():
     min_calc_date = fct_dates[settings["cov_set"]["obs"] - 1] - pd.DateOffset(months=1)
     calc_dates = np.sort(cluster_data_m.loc[cluster_data_m["eom"] >= min_calc_date, "eom"].unique())
 
-    factor_cov_dict = factor_cov_estimate(calc_dates, fct_dates, fct_ret, w_cor, w_var, settings)
+    factor_cov_est = factor_cov_estimate(calc_dates, fct_dates, fct_ret, w_cor, w_var, settings)
 
     spec_risk = unnest_spec_risk(fct_ret_est)
     spec_risk_res_vol = calculate_ewma(spec_risk, settings)
+
+    spec_risk_m, spec_risk_res_vol = process_spec_risk_m(fct_dates, spec_risk_res_vol)
+    barra_cov = calculate_barra_cov(calc_dates, cluster_data_m, spec_risk_m, factor_cov_est)
+
+    results = run_sanity_checks(True, calc_dates, cluster_data_m, spec_risk_m, barra_cov, chars)
+    print(results["valid_count"])
 
 
 if __name__ == "__main__":
