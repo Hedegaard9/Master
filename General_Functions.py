@@ -99,6 +99,57 @@ def initial_weights_new(data, w_type, udf_weights=None):
     return data
 
 
+def pf_ts_fun(weights, data, wealth, gam):
+    # Første join: Vælg de relevante kolonner fra data og join weights på 'id' og 'eom'
+    comb = pd.merge(weights,
+                    data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']],
+                    on=['id', 'eom'],
+                    how='left')
+
+    # Andet join: Join med wealth-data på 'eom'
+    comb = pd.merge(comb,
+                    wealth[['eom', 'wealth']],
+                    on='eom',
+                    how='left')
+
+    # Gruppér på 'eom' og beregn de ønskede aggregater
+    def agg_func(group):
+        inv = np.abs(group['w']).sum()
+        shorting = np.abs(group.loc[group['w'] < 0, 'w']).sum()
+        turnover = np.abs(group['w'] - group['w_start']).sum()
+        r_val = (group['w'] * group['ret_ld1']).sum()
+        # Antag, at wealth er konstant pr. eom – tag den første værdi
+        unique_wealth = group['wealth'].iloc[0]
+        tc = unique_wealth / 2 * (group['lambda'] * (group['w'] - group['w_start']) ** 2).sum()
+        return pd.Series({
+            'inv': inv,
+            'shorting': shorting,
+            'turnover': turnover,
+            'r': r_val,
+            'tc': tc
+        })
+
+    result = comb.groupby('eom').apply(agg_func).reset_index()
+
+    # Beregn eom_ret = eom + 1 måned
+    # Her antages det, at eom er af datetime-type; ellers skal du konvertere.
+    if np.issubdtype(result['eom'].dtype, np.datetime64):
+        result['eom_ret'] = result['eom'] + pd.DateOffset(months=1)
+    else:
+        # Hvis ikke, kan du evt. blot sætte eom_ret til eom eller konvertere eom til datetime.
+        result['eom_ret'] = result['eom']
+
+    # Fjern eom-kolonnen
+    result = result.drop(columns='eom')
+
+    return result
+
+
+
+
+
+
+
 def size_screen_fun(chars, type):
     """
     Funktion til at filtrere aktier baseret på størrelse.

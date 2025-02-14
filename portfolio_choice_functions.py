@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import sqrtm
 import importlib
+from General_Functions import initial_weights_new, create_cov, pf_ts_fun, sigma_gam_adj, create_lambda
 sqrtm_cpp = importlib.import_module("sqrtm_cpp")
 
 # Funktion til beregning af M
