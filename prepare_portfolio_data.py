@@ -3,7 +3,8 @@ import numpy as np
 import os
 import pickle
 from pandas.tseries.offsets import MonthEnd
-
+from Main import settings, features, pf_set
+from datetime import datetime
 
 def add_return_predictions(chars, settings, get_from_path_model): # ikke testet endnu
     """
