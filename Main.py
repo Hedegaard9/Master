@@ -85,7 +85,7 @@ settings = {
     "pf": {
         "dates": {
             "start_year": 1971,
-            "end_year": 2023, #ændret fra 2023
+            "end_yr": 2023, #ændret fra 2023
             "split_years": 10
         },
         "hps": {
