@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 import pandas as pd
 from Main import settings, features, pf_set
+exec(open("Main.py").read())
 
 # --- Kør "Main.py" (svarer til source("Main.R") i R) ---
 
@@ -61,7 +62,6 @@ if not os.path.exists(output_path):
 tic = time.time()
 
 # --- Kør "1 - Prepare Data.py" ---
-# Her antages det, at du har en Python-version af scriptet.
 with open("Prepare_Data.py", encoding="utf-8") as f:
     exec(f.read())
 
