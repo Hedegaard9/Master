@@ -731,8 +731,8 @@ def main():
     spec_risk_m, spec_risk_res_vol = process_spec_risk_m(fct_dates, spec_risk_res_vol)
     barra_cov = calculate_barra_cov(calc_dates, cluster_data_m, spec_risk_m, factor_cov_est)
 
-    results = run_sanity_checks(True, calc_dates, cluster_data_m, spec_risk_m, barra_cov, chars)
-    print(results["valid_count"])
+    #results = run_sanity_checks(True, calc_dates, cluster_data_m, spec_risk_m, barra_cov, chars)
+    return barra_cov
 
 
 if __name__ == "__main__":
