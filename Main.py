@@ -58,9 +58,9 @@ settings = {
     "seed_no": 1,
     "months": False,
     "split": {
-        "train_end": datetime(2015, 12, 31),
+        "train_end": datetime(1970, 12, 31),
         "test_end": datetime(2023, 11, 30),   #ændret fra (2020, 12, 31)
-        "val_years": 3,
+        "val_years": 10,
         "model_update_freq": "yearly",
         "train_lookback": 1000,
         "retrain_lookback": 1000
@@ -71,7 +71,7 @@ settings = {
     "addition_n": 12,
     "deletion_n": 12,
     "screens": {
-        "start": datetime(2010, 12, 31),
+        "start": datetime(1952, 12, 31),
         "end": datetime(2023, 11, 30), #ændret fra (2020, 12, 31)
         "feat_pct": 0.5,
         "nyse_stocks": True
@@ -84,7 +84,7 @@ settings = {
     },
     "pf": {
         "dates": {
-            "start_year": 2010,
+            "start_year": 1971,
             "end_year": 2023, #ændret fra 2023
             "split_years": 10
         },
