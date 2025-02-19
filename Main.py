@@ -9,6 +9,13 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LassoCV
 from datetime import datetime, timedelta
 import seaborn as sns
+exec(open("General_Functions.py").read())
+exec(open("return_prediction_functions.py").read())
+exec(open("portfolio_choice_functions.py").read())
+import importlib
+ewma = importlib.import_module("ewma")
+sqrtm_cpp = importlib.import_module("sqrtm_cpp")
+
 
 # Options
 pd.options.mode.chained_assignment = None  # Suppress pandas warnings
@@ -85,7 +92,7 @@ settings = {
     "pf": {
         "dates": {
             "start_year": 1971,
-            "end_year": 2023, #ændret fra 2023
+            "end_yr": 2023, #ændret fra 2023
             "split_years": 10
         },
         "hps": {
