@@ -38,7 +38,15 @@ h_list = [1]  # Horisonter
 data_ret = data_run_files.monthly_returns(risk_free, h_list, output_path_usa)
 chars, daily = Prepare_Data.process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
 
-
+print("risk_free.head")
+print(risk_free.head())
+print(h_list)
+print("data_ret.head")
+print(data_ret.head())
+print("chars.head")
+print(chars.head())
+print("daily.head")
+print(daily.head())
 # Version med 12 horisonter
 #search_grid = pd.DataFrame({
 #    'name': [f'm{i}' for i in range(1, 13)],
@@ -77,7 +85,10 @@ for i in range(len(search_grid)):
     # Join med de rækker i 'chars', hvor valid er True, på kolonnerne id og eom
     valid_chars = chars[chars['valid'] == True]
     data_pred = pd.merge(pred_y_df, valid_chars, on=['id', 'eom'], how='inner')
-
+    print("data_pred.head")
+    print(data_pred.head())
+    print("data_pred.tail")
+    print(data_pred.tail())
     print("horizons:", [h])
 
     # Bestem validerings-slutdatoer og test-inc baseret på settings
@@ -89,7 +100,7 @@ for i in range(len(search_grid)):
         # Opret en liste af datoer med årligt interval
         val_ends = pd.date_range(start=settings['split']['train_end'],
                                  end=settings['split']['test_end'],
-                                 freq='Y').to_pydatetime().tolist()
+                                 freq='YE').to_pydatetime().tolist()
         test_inc = 1
     elif update_freq == "decade":
         start_date = pd.to_datetime(settings['split']['train_end'])
@@ -119,14 +130,21 @@ for i in range(len(search_grid)):
             test_inc=test_inc,
             test_end=settings['split']['test_end']
         )
-        # Træn modellen med rff_hp_search – forudsætter også, at denne funktion er defineret
+        print("Train data:")
+        print(train_test_val["train"].head())
+        print("\nValidation data:")
+        print(train_test_val["val"].head())
+        print("\nTrain full data:")
+        print(train_test_val["train_full"].head())
+        print("\nTest data:")
+        print(train_test_val["test"].head())
         model_start = time.time()
         model_op = return_prediction_functions.rff_hp_search(
             train_test_val,
             feat=features,
             p_vec=settings['rff']['p_vec'],
             g_vec=settings['rff']['g_vec'],
-            l_vec=settings['rff']['l'],
+            l_vec=settings['rff']['l_vec'],
             seed=settings['seed_no']
         )
         model_time = time.time() - model_start
