@@ -67,10 +67,10 @@ settings = {
     "split": {
         "train_end": datetime(2015, 12, 31),
         "test_end": datetime(2023, 11, 30),   #ændret fra (2020, 12, 31)
-        "val_years": 3,
+        "val_years": 2,  # ændret fra 3
         "model_update_freq": "yearly",
-        "train_lookback": 1000,
-        "retrain_lookback": 1000
+        "train_lookback": 100,  # forsøgt ændret
+        "retrain_lookback": 100 # forsøgt ændret
     },
     "feat_prank": True,
     "ret_impute": "zero",

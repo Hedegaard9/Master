@@ -3,6 +3,7 @@ from dateutil.relativedelta import relativedelta
 import statsmodels.api as sm
 import numpy as np
 from sklearn.linear_model import RidgeCV
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 import xgboost as xgb
@@ -142,13 +143,12 @@ def rff(X, p=None, g=None, W=None):
     return {"W": W, "X_cos": X_cos, "X_sin": X_sin}
 
 
-
 def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     """
     Søger efter de optimale hyperparametre for Random Fourier Features og Ridge Regression.
 
     Args:
-        data (dict): Dictionary med train, val, test, og train_full data (output fra data_split).
+        data (dict): Dictionary med 'train', 'val', 'train_full' og 'test' DataFrames.
         feat (list): Liste over feature-kolonner.
         p_vec (list): Liste over værdier for antal Fourier-funktioner (skal være delbare med 2).
         g_vec (list): Liste over værdier for g (skala for vægte).
@@ -158,62 +158,80 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     Returns:
         dict: Dictionary med:
             - "fit": Den endelige Ridge Regression-model.
-            - "pred": Forudsigelser for testdata.
-            - "hp_search": DataFrame med søgning over hyperparametre.
-            - "W": De optimale vægte.
-            - "opt_hps": Optimale hyperparametre.
+            - "pred": Forudsigelser for testdata som en DataFrame.
+            - "hp_search": DataFrame med søgning over hyperparametre (g, p, lambda, mse).
+            - "W": De optimale vægte (udtrukket fra rff_train for den optimale g).
+            - "opt_hps": Den række med de optimale hyperparametre.
     """
     np.random.seed(seed)
-    val_errors = []
+    val_errors_list = []
+    rff_info = {}  # Gemmer rff_train["W"] for hver g
 
+    # Loop over g-værdier
     for g in g_vec:
         print(f"g: {g}")
-        # Random Fourier Features for træning og valideringsdata
+        # Generer random Fourier features for træningsdata med p = max(p_vec)
         rff_train = rff(data["train"][feat].values, p=max(p_vec), g=g)
-        rff_val = rff(data["val"][feat].values, W=rff_train["W"])
+        # Brug de samme vægte til valideringsdata
+        rff_val = rff(data["val"][feat].values, p=max(p_vec), W=rff_train["W"])
 
+        # Loop over p-værdier
         for p in p_vec:
-            print(f"---> p: {p}")
-            # Skalerede Fourier-funktioner
-            X_train = (p ** -0.5) * np.hstack((rff_train["X_cos"][:, :p // 2], rff_train["X_sin"][:, :p // 2]))
-            X_val = (p ** -0.5) * np.hstack((rff_val["X_cos"][:, :p // 2], rff_val["X_sin"][:, :p // 2]))
+            print(f"  --> p: {p}")
+            # Skalering: p^(-0.5) gange de første p/2 kolonner af cosine og sine
+            half_p = int(p // 2)
+            X_train = (p ** -0.5) * np.hstack((rff_train["X_cos"][:, :half_p],
+                                               rff_train["X_sin"][:, :half_p]))
+            X_val = (p ** -0.5) * np.hstack((rff_val["X_cos"][:, :half_p],
+                                             rff_val["X_sin"][:, :half_p]))
             y_train = data["train"]["ret_pred"].values
             y_val = data["val"]["ret_pred"].values
 
-            # Ridge regression med cross-validation over l_vec
-            ridge = RidgeCV(alphas=l_vec, store_cv_values=True).fit(X_train, y_train)
-            preds = ridge.predict(X_val)
-            mse = mean_squared_error(y_val, preds)
+            # Loop over lambda-værdier
+            for lam in l_vec:
+                model = Ridge(alpha=lam, fit_intercept=False)
+                model.fit(X_train, y_train)
+                preds = model.predict(X_val)
+                mse = np.mean((preds - y_val) ** 2)
+                val_errors_list.append({"g": g, "p": p, "lambda": lam, "mse": mse})
 
-            val_errors.append({"g": g, "p": p, "lambda": ridge.alpha_, "mse": mse})
+        # Gem W for den aktuelle g (kun én gang pr. g)
+        rff_info[str(g)] = rff_train["W"]
 
-    # Find optimale hyperparametre
-    val_errors_df = pd.DataFrame(val_errors)
-    opt_hps = val_errors_df.loc[val_errors_df["mse"].idxmin()]
+    # Saml resultaterne i en DataFrame
+    val_errors_df = pd.DataFrame(val_errors_list)
+    # Find de hyperparametre med lavest MSE
+    opt_idx = val_errors_df["mse"].idxmin()
+    opt_hps = val_errors_df.loc[opt_idx]
     print(f"Optimal g: {opt_hps['g']}, p: {opt_hps['p']}, lambda: {opt_hps['lambda']}")
 
-    # Refit på train_full data
-    rff_train_full = rff(data["train_full"][feat].values, W=rff_train["W"])
-    X_train_full = (opt_hps["p"] ** -0.5) * np.hstack((rff_train_full["X_cos"], rff_train_full["X_sin"]))
-    y_train_full = data["train_full"]["ret_pred"].values
+    # Hent de optimale weights for den valgte g: tag de første p/2 kolonner
+    opt_g = str(opt_hps["g"])
+    opt_p = int(opt_hps["p"])
+    half_opt_p = int(opt_p // 2)
+    opt_W = rff_info[opt_g][:, :half_opt_p]
 
-    final_model = RidgeCV(alphas=[opt_hps["lambda"]]).fit(X_train_full, y_train_full)
+    # Re-fit på train_full data
+    rff_train_full = rff(data["train_full"][feat].values, W=opt_W)
+    X_train_full = (opt_p ** -0.5) * np.hstack((rff_train_full["X_cos"], rff_train_full["X_sin"]))
+    y_train_full = data["train_full"]["ret_pred"].values
+    final_model = Ridge(alpha=opt_hps["lambda"], fit_intercept=False)
+    final_model.fit(X_train_full, y_train_full)
 
     # Forudsig på testdata
-    rff_test = rff(data["test"][feat].values, W=rff_train["W"])
-    X_test = (opt_hps["p"] ** -0.5) * np.hstack((rff_test["X_cos"], rff_test["X_sin"]))
+    rff_test = rff(data["test"][feat].values, W=opt_W)
+    X_test = (opt_p ** -0.5) * np.hstack((rff_test["X_cos"], rff_test["X_sin"]))
     preds_test = final_model.predict(X_test)
 
-    # Opret forudsigelses-DataFrame
+    # Opret en DataFrame med forudsigelser
     pred_op = data["test"][["id", "eom", "eom_pred_last"]].copy()
     pred_op["pred"] = preds_test
 
-    # Return resultater
     return {
         "fit": final_model,
         "pred": pred_op,
         "hp_search": val_errors_df,
-        "W": rff_train["W"][:, :int(opt_hps["p"] // 2)],
+        "W": opt_W,
         "opt_hps": opt_hps
     }
 
