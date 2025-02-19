@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import xgboost as xgb
 from sklearn.utils import resample
 
-def data_split(data, val_end, val_years, train_start, train_lookback, retrain_lookback, test_inc, test_end):
+def data_split(data, type, val_end, val_years, train_start, train_lookback, retrain_lookback, test_inc, test_end):
     """
     Splitter data i train, validation, test og fuld træning baseret på datoer.
 
