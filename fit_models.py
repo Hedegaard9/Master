@@ -8,7 +8,6 @@ from pandas.tseries.offsets import DateOffset
 import Prepare_Data
 import data_run_files
 import return_prediction_functions
-
 # exec(open("Prepare_Data.py").read()) # udkommenteret, da jeg ikke lige ved, om den bliver brugt.
 # exec(open("data_run_files.py").read()) # mulighed for denne løsning
 file_path_usa_dsf = "./Data/usa_dsf.parquet"
@@ -109,8 +108,7 @@ for i in range(len(search_grid)):
     # Iterer over hver validerings-slutdato
     for val_end in val_ends:
         print(val_end)
-        # Her kaldes funktionen data_split på data_pred – forudsætter, at den er defineret et sted
-        train_test_val = data_split(
+        train_test_val = return_prediction_functions.data_split(
             data_pred,
             type=update_freq,
             val_end=val_end,
