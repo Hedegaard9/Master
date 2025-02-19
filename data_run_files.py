@@ -301,9 +301,9 @@ def main():
     # lav testsæt for market returns
     filter_and_save_data(file_path_market_returns, start_date, end_date, output_path_market_returns)
     # Beregn månedlige afkast
-    #h_list = [1, 2]  # Horisonter
-    #final_result = monthly_returns(risk_free, h_list, output_path_usa)
-
+    h_list = [1]  # Horisonter
+    dataret = monthly_returns(risk_free, h_list, output_path_usa)
+    print(dataret.head())
     print("Alle processer er gennemført!")
 
 
