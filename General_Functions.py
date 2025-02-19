@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import re
 import gc
+import xgboost
 
 # Read configuration file
 def read_config(file):

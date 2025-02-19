@@ -616,3 +616,56 @@ def prepare_daily_returns(file_path, data):
     daily["eom"] = daily["date"] + pd.offsets.MonthEnd(0)
 
     return daily
+
+
+
+def main():
+    # Definer filstier (tilpas disse til dine data)
+    file_path_usa = "./Data/usa.parquet"
+    file_path_rvol_252 = "./Data/rvol_252.csv"
+    file_path_usa_test = "./data_test/usa_test.parquet"
+    daily_file_path = "./data_test/usa_dsf_test.parquet"
+    file_path_world_ret = "./data_test/world_ret_test.csv"
+    risk_free_path = "./data_test/risk_free_test.csv"
+    market_path = "./data_test/market_returns_test.csv"
+    file_path_cluster_labels = "Data/Cluster Labels.csv"
+    file_path_factor_details = "Data/Factor Details.xlsx"
+    rente_path = "Data/ff3_m.csv"
+
+    # Hent ekstra indstillinger
+    wealth_end = pf_set["wealth"]
+    end = settings["split"]["test_end"]
+
+    # Kald funktionerne og gem resultaterne
+    df_merged = merge_rvol_data(file_path_usa, file_path_rvol_252)
+    risk_free = process_risk_free_rate(rente_path)
+    market_test = load_and_filter_market_returns_test(market_path)
+    data_ret_ld1 = process_return_data(file_path_world_ret, risk_free_path)
+    wealth = wealth_func(wealth_end, end, market_test, risk_free)
+    data = load_and_prepare_data(file_path_usa_test, features)
+    chars, daily = process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
+    df_daily_returns = prepare_daily_returns(daily_file_path, data)
+
+    # Udskriv heads for alle resultater
+    print("df_merged head:")
+    print(df_merged.head())
+    print("\nrisk_free head:")
+    print(risk_free.head())
+    print("\nmarket_test head:")
+    print(market_test.head())
+    print("\ndata_ret_ld1 head:")
+    print(data_ret_ld1.head())
+    print("\nwealth head:")
+    print(wealth.head()) #
+    print("\ndata head:")
+    print(data.head())
+    print("\nchars head:")
+    print(chars.head())
+    print("\ndaily head:")
+    print(daily.head())
+    print("\ndf_daily_returns head:")
+    print(df_daily_returns.head())
+
+
+if __name__ == "__main__":
+    main()

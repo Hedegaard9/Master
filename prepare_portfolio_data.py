@@ -116,3 +116,11 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
         "dates_oos": dates_oos,
         "dates_hp": dates_hp
     }
+
+def main(chars, barra_cov):
+    #    add_return_predictions(chars, settings, get_from_path_model) # mangler pickle funktion
+    lambda_list = create_lambda_list(chars)
+    first_cov_date, hp_years, start_oos = define_important_dates(barra_cov, settings)
+
+
+

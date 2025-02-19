@@ -9,6 +9,16 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LassoCV
 from datetime import datetime, timedelta
 import seaborn as sns
+import General_Functions
+import return_prediction_functions
+import portfolio_choice_functions
+exec(open("General_Functions.py").read())
+exec(open("return_prediction_functions.py").read())
+exec(open("portfolio_choice_functions.py").read())
+import importlib
+ewma = importlib.import_module("ewma")
+sqrtm_cpp = importlib.import_module("sqrtm_cpp")
+
 
 # Options
 pd.options.mode.chained_assignment = None  # Suppress pandas warnings
