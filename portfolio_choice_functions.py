@@ -63,6 +63,7 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
     data["eom"] = pd.to_datetime(data["eom"])
     data["eom_pred_last"] = pd.to_datetime(data["eom_pred_last"])
 
+
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(
         by=["id", "eom"])
     data_split = {key: group for key, group in data_rel.groupby("eom")}
