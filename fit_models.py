@@ -8,6 +8,7 @@ from pandas.tseries.offsets import DateOffset
 import Prepare_Data
 import data_run_files
 import return_prediction_functions
+from pandas.tseries.offsets import MonthEnd
 # exec(open("Prepare_Data.py").read()) # udkommenteret, da jeg ikke lige ved, om den bliver brugt.
 # exec(open("data_run_files.py").read()) # mulighed for denne løsning
 file_path_usa_dsf = "./Data/usa_dsf.parquet"
@@ -79,7 +80,7 @@ for i in range(len(search_grid)):
     pred_y_df = data_ret[['id', 'eom']].copy()
     # Beregn eom_pred_last: Vi antager, at vi ønsker at beregne slutdatoen for forudsigelsen som:
     # eom + (h+1) måneder - 1 dag (svarer nogenlunde til R's eom+1+months(max(h))-1)
-    pred_y_df['eom_pred_last'] = pred_y_df['eom'] + DateOffset(months=int(h) + 1) - DateOffset(days=1)
+    pred_y_df['eom_pred_last'] = pred_y_df['eom'] + MonthEnd(1)
     pred_y_df['ret_pred'] = pred_y_values
 
     # Join med de rækker i 'chars', hvor valid er True, på kolonnerne id og eom
