@@ -59,7 +59,12 @@ def w_fun(data, dates, w_opt, wealth):
 
 # Implementering af tangensportefølje
 def tpf_implement(data, cov_list, wealth, dates, gam):
-    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(by=["id", "eom"])
+    # Konverter eom og eom_pred_last til datetime, hvis de ikke allerede er det
+    data["eom"] = pd.to_datetime(data["eom"])
+    data["eom_pred_last"] = pd.to_datetime(data["eom_pred_last"])
+
+    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(
+        by=["id", "eom"])
     data_split = {key: group for key, group in data_rel.groupby("eom")}
     tpf_opt = []
     for d in dates:
@@ -73,6 +78,7 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
     tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
     tpf_pf["type"] = "Markowitz-ML"
     return {"w": tpf_w, "pf": tpf_pf}
+
 
 # Counterfactual TPF
 def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, cov_list, dates, seed):
