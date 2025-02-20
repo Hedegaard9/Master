@@ -17,6 +17,21 @@ def add_return_predictions(chars, settings, get_from_path_model):
 
     Returns:
         pd.DataFrame: Opdateret `chars` med return predictions.
+
+    Example:
+        output_path_usa = "./data_test/usa_test.parquet"
+        start_date = "2010-01-31"
+        rente_path = "Data/ff3_m.csv"
+        daily_file_path = "./data_test/usa_dsf_test.parquet"
+        file_path_world_ret = "./data_test/world_ret_test.csv"
+        file_path_usa_test = "./data_test/usa_test.parquet"
+        risk_free_path = "./data_test/risk_free_test.csv"
+        market_path = "./data_test/market_returns_test.csv"
+        daily_file_path = "./data_test/usa_dsf_test.parquet"
+        risk_free = data_run_files.process_risk_free_rate(rente_path, start_date)
+        h_list = [1]  # Horisonter
+        data_ret = data_run_files.monthly_returns(risk_free, h_list, output_path_usa)
+        chars, daily = Prepare_Data.process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
     """
     for h in range(1, settings['pf']['hps']['m1']['K'] + 1):
         file_path = os.path.join(get_from_path_model, f"model_{h}.pkl")
