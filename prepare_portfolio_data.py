@@ -6,7 +6,8 @@ from pandas.tseries.offsets import MonthEnd
 from Main import settings, features, pf_set
 from datetime import datetime
 
-def add_return_predictions(chars, settings, get_from_path_model): # ikke testet endnu
+
+def add_return_predictions(chars, settings, get_from_path_model):
     """
     Tilføjer return predictions til `chars` baseret på data fra pickle-filer.
 
@@ -17,20 +18,25 @@ def add_return_predictions(chars, settings, get_from_path_model): # ikke testet 
 
     Returns:
         pd.DataFrame: Opdateret `chars` med return predictions.
-
-    Example:
-        chars = add_return_predictions(chars, settings, get_from_path_model)
     """
     for h in range(1, settings['pf']['hps']['m1']['K'] + 1):
-        file_path = os.path.join(get_from_path_model, f"model_{h}.pkl")  # Brug pickle i stedet for RDS
-
+        file_path = os.path.join(get_from_path_model, f"model_{h}.pkl")
         with open(file_path, 'rb') as f:
-            pred_data = pickle.load(f)  # Indlæs pickle-fil
+            model_dict = pickle.load(f)  # Indlæs pickle-fil
 
-        pred_df = pd.DataFrame(pred_data['pred'])  # Konverter til DataFrame
-        pred_df = pred_df[['id', 'eom', 'pred']].rename(columns={'pred': f'pred_ld{h}'})  # Omdøb kolonne
+        # Iterer over dato-nøgler og udtræk forudsigelser
+        all_preds = []
+        for date_key, subdict in model_dict.items():
+            # Antag at hver subdictionary indeholder en key "pred"
+            pred_df = pd.DataFrame(subdict['pred'])
+            all_preds.append(pred_df)
 
-        chars = chars.merge(pred_df, on=['id', 'eom'], how='left')  # Merge forudsigelser ind i chars
+        # Saml alle forudsigelsesdata
+        pred_df_all = pd.concat(all_preds, ignore_index=True)
+        pred_df_all = pred_df_all[['id', 'eom', 'pred']].rename(columns={'pred': f'pred_ld{h}'})
+
+        # Merge forudsigelserne ind i chars
+        chars = chars.merge(pred_df_all, on=['id', 'eom'], how='left')
 
     return chars
 
