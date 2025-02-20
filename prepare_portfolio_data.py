@@ -5,6 +5,9 @@ import pickle
 from pandas.tseries.offsets import MonthEnd
 from Main import settings, features, pf_set
 from datetime import datetime
+import data_run_files
+import Prepare_Data
+import Estimate_Covariance_Matrix as ECM
 
 def add_return_predictions(chars, settings, get_from_path_model):
     """
@@ -118,17 +121,17 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
         date_ranges["dates_m1"]
         print(date_ranges)
     """
-    dates_m1 = pd.date_range(start=settings['split']['train_end'] + pd.DateOffset(days=1),
-                             end=settings['split']['test_end'] + pd.DateOffset(days=1) - MonthEnd(1), freq='ME')
+    end_date = settings['split']['test_end'] - MonthEnd(1)
+    start_date_oos = datetime(start_oos - 1, 12, 31)
+    start_date_hp = datetime(min(hp_years), 1, 1) - MonthEnd(1)
 
-    dates_m2 = pd.date_range(start=first_cov_date + pd.DateOffset(months=pf_set['lb_hor'] + 1),
-                             end=settings['split']['test_end'] + pd.DateOffset(days=1) - MonthEnd(1), freq='ME')
+    dates_m1 = pd.date_range(start=settings['split']['train_end'], end=end_date, freq='ME')
 
-    dates_oos = pd.date_range(start=datetime(start_oos, 1, 1),
-                              end=settings['split']['test_end'] + pd.DateOffset(days=1) - MonthEnd(1), freq='ME')
+    dates_m2 = pd.date_range(start=first_cov_date + pd.DateOffset(months=pf_set['lb_hor'] + 1), end=end_date, freq='ME')
 
-    dates_hp = pd.date_range(start=datetime(min(hp_years), 1, 1),
-                             end=settings['split']['test_end'] + pd.DateOffset(days=1) - MonthEnd(1), freq='ME')
+    dates_oos = pd.date_range(start=start_date_oos, end=end_date, freq='ME')
+
+    dates_hp = pd.date_range(start=start_date_hp,end=end_date, freq='ME')
 
     return {
         "dates_m1": dates_m1,
@@ -138,9 +141,24 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
     }
 
 def main(chars, barra_cov):
-    #    add_return_predictions(chars, settings, get_from_path_model) # mangler pickle funktion
+    get_from_path_model = "./data_test/"
+    output_path_usa = "./data_test/usa_test.parquet"
+    start_date = "2010-01-31"
+    rente_path = "Data/ff3_m.csv"
+    daily_file_path = "./data_test/usa_dsf_test.parquet"
+    file_path_world_ret = "./data_test/world_ret_test.csv"
+    file_path_usa_test = "./data_test/usa_test.parquet"
+    risk_free_path = "./data_test/risk_free_test.csv"
+    market_path = "./data_test/market_returns_test.csv"
+    daily_file_path = "./data_test/usa_dsf_test.parquet"
+    risk_free = data_run_files.process_risk_free_rate(rente_path, start_date)
+    h_list = [1]  # Horisonter
+    data_ret = data_run_files.monthly_returns(risk_free, h_list, output_path_usa)
+    chars, daily = Prepare_Data.process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret,risk_free_path, market_path)
+    chars = add_return_predictions(chars, settings, get_from_path_model) # mangler pickle funktion
     lambda_list = create_lambda_list(chars)
     first_cov_date, hp_years, start_oos = define_important_dates(barra_cov, settings)
-
+    date_ranges = create_date_ranges(settings, first_cov_date, start_oos, hp_years)
+    print(date_ranges)
 
 
