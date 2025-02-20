@@ -21,9 +21,15 @@ def create_cov(x, ids=None):
         load = x['fct_load']
         ivol = x['ivol_vec']
     else:
+        # Konverter ids til strings
+        ids = pd.Index(ids).astype(str)
         load = x['fct_load'].loc[ids]
         ivol = x['ivol_vec'].loc[ids]
     return load @ x['fct_cov'] @ load.T + np.diag(ivol)
+
+
+
+
 
 # Create lambda
 def create_lambda(x, ids):

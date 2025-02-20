@@ -223,7 +223,8 @@ def ew_implement(data, wealth, dates, pf_set):
     return {"w": ew_w, "pf": ew_pf}
 
 # Market Portfolio Implementation
-def mkt_implement(data, wealth, dates):
+def mkt_implement(data, wealth, dates, pf_set):
+    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates)]
     mkt_opt = data_rel.groupby("eom").apply(lambda x: pd.DataFrame({
         "id": x["id"],
@@ -232,13 +233,14 @@ def mkt_implement(data, wealth, dates):
     })).reset_index(drop=True)
 
     mkt_w = w_fun(data, dates, mkt_opt, wealth)
-    mkt_pf = pf_ts_fun(mkt_w, data, wealth, gam=None)  # Assuming `gam` is predefined or unnecessary
+    mkt_pf = pf_ts_fun(mkt_w, data, wealth, gam=pf_set['gamma_rel'])
     mkt_pf["type"] = "Market"
 
     return {"w": mkt_w, "pf": mkt_pf}
 
 # Rank-Weighted Portfolio Implementation
-def rw_implement(data, wealth, dates):
+def rw_implement(data, wealth, dates, pf_set):
+    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "pred_ld1"]]
     data_split = {key: group for key, group in data_rel.groupby("eom")}
 
@@ -252,20 +254,21 @@ def rw_implement(data, wealth, dates):
 
     rw_opt = pd.concat(rw_opt)
     rw_w = w_fun(data, dates, rw_opt, wealth)
-    rw_pf = pf_ts_fun(rw_w, data, wealth, gam=None)  # Assuming `gam` is predefined or unnecessary
+    rw_pf = pf_ts_fun(rw_w, data, wealth, gam=pf_set['gamma_rel'])  # Assuming `gam` is predefined or unnecessary
     rw_pf["type"] = "Rank-ML"
 
     return {"w": rw_w, "pf": rw_pf}
 
 #Minimum Variance Portfolio
-def mv_implement(data, cov_list, wealth, dates):
+def mv_implement(data, cov_list, wealth, dates, pf_set):
+    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me"]]
     data_split = {key: group for key, group in data_rel.groupby("eom")}
 
     mv_opt = []
     for d in dates:
         data_sub = data_split[d]
-        sig = create_cov(cov_list[d], data_sub["id"])
+        sig = create_cov(cov_list[d.strftime("%Y-%m-%d")], data_sub["id"])
         sig_inv = np.linalg.inv(sig)
         ones = np.ones((sig_inv.shape[0], 1))
         pos = (1 / (ones.T @ sig_inv @ ones)) * (sig_inv @ ones)
