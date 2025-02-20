@@ -6,7 +6,6 @@ from pandas.tseries.offsets import MonthEnd
 from Main import settings, features, pf_set
 from datetime import datetime
 
-
 def add_return_predictions(chars, settings, get_from_path_model):
     """
     Tilføjer return predictions til `chars` baseret på data fra pickle-filer.
