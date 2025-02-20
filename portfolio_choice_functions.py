@@ -102,23 +102,6 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
     tpf_pf["type"] = "Markowitz-ML"
     return {"w": tpf_w, "pf": tpf_pf}
 
-# Implementering af tangensportefølje
-def tpf_implement1(data, cov_list, wealth, dates, gam):
-    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1_x"]].sort_values(by=["id", "eom"])
-    data_split = {key: group for key, group in data_rel.groupby("eom")}
-    tpf_opt = []
-    for d in dates:
-        data_sub = data_split[d]
-        ids = data_sub["id"]
-        sigma = create_cov(cov_list[d.strftime("%Y-%m-%d")], ids)
-        weights = np.linalg.solve(sigma, data_sub["pred_ld1_x"]) / gam
-        tpf_opt.append(pd.DataFrame({"id": data_sub["id"], "eom": d, "w": weights}))
-    tpf_opt = pd.concat(tpf_opt)
-    tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
-    tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
-    tpf_pf["type"] = "Markowitz-ML"
-    return {"w": tpf_w, "pf": tpf_pf}
-
 # Counterfactual TPF
 def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, cov_list, dates, seed):
     np.random.seed(seed)
