@@ -4,6 +4,7 @@ from scipy.linalg import sqrtm
 import importlib
 from General_Functions import initial_weights_new, create_cov, pf_ts_fun, sigma_gam_adj, create_lambda
 sqrtm_cpp = importlib.import_module("sqrtm_cpp")
+from Main import settings, pf_set, features
 
 # Funktion til beregning af M
 def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter):
