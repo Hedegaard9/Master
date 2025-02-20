@@ -85,6 +85,23 @@ def w_fun(data, dates, w_opt, wealth):
     return w
 
 # Implementering af tangensportefølje
+def tpf_implement(data, cov_list, wealth, dates, gam):
+    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(by=["id", "eom"])
+    data_split = {key: group for key, group in data_rel.groupby("eom")}
+    tpf_opt = []
+    for d in dates:
+        data_sub = data_split[d]
+        ids = data_sub["id"]
+        sigma = create_cov(cov_list[d], ids)
+        weights = np.linalg.solve(sigma, data_sub["pred_ld1"]) / gam
+        tpf_opt.append(pd.DataFrame({"id": data_sub["id"], "eom": d, "w": weights}))
+    tpf_opt = pd.concat(tpf_opt)
+    tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
+    tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
+    tpf_pf["type"] = "Markowitz-ML"
+    return {"w": tpf_w, "pf": tpf_pf}
+
+# Implementering af tangensportefølje
 def tpf_implement1(data, cov_list, wealth, dates, gam):
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1_x"]].sort_values(by=["id", "eom"])
     data_split = {key: group for key, group in data_rel.groupby("eom")}
