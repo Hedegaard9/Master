@@ -86,6 +86,7 @@ def w_fun(data, dates, w_opt, wealth):
 
 # Implementering af tangensportefølje
 def tpf_implement(data, cov_list, wealth, dates, gam):
+    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
     # Konverter eom og eom_pred_last til datetime, hvis de ikke allerede er det
     data["eom"] = pd.to_datetime(data["eom"])
     data["eom_pred_last"] = pd.to_datetime(data["eom_pred_last"])
@@ -176,6 +177,7 @@ def mv_risky_fun(data, cov_list, wealth, dates, gam, u_vec):
 
 # High Minus Low (HML) Implementation
 def factor_ml_implement(data, wealth, dates, n_pfs, gam):
+    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
     data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "pred_ld1"]]
     data_split = {key: group for key, group in data_rel.groupby("eom")}
 
