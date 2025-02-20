@@ -42,31 +42,58 @@ def m_static(sigma_gam, w, lambda_matrix, phi):
 ## Benchamark porteføljer
 # Generisk vægtfunktion
 def w_fun(data, dates, w_opt, wealth):
-    data = data.copy()
-    dates_prev = pd.DataFrame({'eom': dates, 'eom_prev': dates.shift(1)})
-    data = initial_weights_new(data, w_type="vw").drop(columns=["w"])
-    data = pd.merge(data, w_opt, on=["id", "eom"], how="left")
-    data = pd.merge(data, dates_prev, on="eom", how="left")
-    w_opt = pd.merge(w_opt, data[['id', 'eom', 'tr_ld1']], on=["id", "eom"], how="left")
-    w_opt = pd.merge(w_opt, wealth[['eom', 'mu_ld1']], on="eom", how="left")
-    w_opt["w"] = w_opt["w"] * (1 + w_opt["tr_ld1"]) / (1 + w_opt["mu_ld1"])
-    w_opt.rename(columns={"w": "w_prev", "eom": "eom_prev"}, inplace=True)
-    data = pd.merge(data, w_opt, on=["id", "eom_prev"], how="left")
-    data.loc[data["eom"] != data["eom"].min(), "w_start"] = data["w_prev"]
-    data["w_start"].fillna(0, inplace=True)
-    data.drop(columns=["eom_prev", "w_prev"], inplace=True)
-    return data
+    # Opret et DataFrame med slutmåned (eom) og forrige slutmåned (eom_prev)
+    dates_df = pd.DataFrame({'eom': dates})
+    dates_df['eom_prev'] = dates_df['eom'].shift(1)
+
+    # Udregn initiale vægte og fjern kolonnen 'w'
+    w = initial_weights_new(data, w_type="vw").drop(columns=['w'])
+
+    # Join: tilføj w_opt på (id, eom)
+    w = pd.merge(w, w_opt, on=['id', 'eom'], how='left')
+
+    # Join med dates_df for at få eom_prev
+    w = pd.merge(w, dates_df, on='eom', how='left')
+
+    # Tilføj 'tr_ld1' fra data til w_opt (join på id og eom)
+    data_subset = data[['id', 'eom', 'tr_ld1']]
+    w_opt = pd.merge(w_opt, data_subset, on=['id', 'eom'], how='left')
+
+    # Tilføj 'mu_ld1' fra wealth (join på eom)
+    wealth_subset = wealth[['eom', 'mu_ld1']]
+    w_opt = pd.merge(w_opt, wealth_subset, on='eom', how='left')
+
+    # Opdater 'w' ift. afkastjustering: w = w*(1+tr_ld1)/(1+mu_ld1)
+    w_opt['w'] = w_opt['w'] * (1 + w_opt['tr_ld1']) / (1 + w_opt['mu_ld1'])
+
+    # Omdøb kolonner: 'w' -> 'w_prev' og 'eom' -> 'eom_prev'
+    w_opt = w_opt.rename(columns={'w': 'w_prev', 'eom': 'eom_prev'})
+
+    # Join w med w_opt på (id, eom_prev)
+    w = pd.merge(w, w_opt, left_on=['id', 'eom_prev'], right_on=['id', 'eom_prev'], how='left')
+
+    # For alle rækker, hvor eom ikke er den mindste dato, sættes w_start = w_prev
+    min_eom = w['eom'].min()
+    w.loc[w['eom'] != min_eom, 'w_start'] = w['w_prev']
+
+    # Udfyld eventuelle manglende værdier i w_start med 0
+    w['w_start'] = w['w_start'].fillna(0)
+
+    # Fjern de midlertidige kolonner
+    w = w.drop(columns=['eom_prev', 'w_prev'])
+
+    return w
 
 # Implementering af tangensportefølje
-def tpf_implement(data, cov_list, wealth, dates, gam):
-    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(by=["id", "eom"])
+def tpf_implement1(data, cov_list, wealth, dates, gam):
+    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1_x"]].sort_values(by=["id", "eom"])
     data_split = {key: group for key, group in data_rel.groupby("eom")}
     tpf_opt = []
     for d in dates:
         data_sub = data_split[d]
         ids = data_sub["id"]
-        sigma = create_cov(cov_list[d], ids)
-        weights = np.linalg.solve(sigma, data_sub["pred_ld1"]) / gam
+        sigma = create_cov(cov_list[d.strftime("%Y-%m-%d")], ids)
+        weights = np.linalg.solve(sigma, data_sub["pred_ld1_x"]) / gam
         tpf_opt.append(pd.DataFrame({"id": data_sub["id"], "eom": d, "w": weights}))
     tpf_opt = pd.concat(tpf_opt)
     tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
@@ -167,16 +194,24 @@ def factor_ml_implement(data, wealth, dates, n_pfs, gam):
 
 # 1/N Portfolio Implementation
 def ew_implement(data, wealth, dates):
-    data_rel = data.loc[data["valid"] & data["eom"].isin(dates)]
-    ew_opt = data_rel.groupby("eom").apply(lambda x: pd.DataFrame({
-        "id": x["id"],
-        "eom": x["eom"],
-        "w": 1 / len(x)
-    })).reset_index(drop=True)
+    # Filtrer data, så kun gyldige rækker med eom i dates bevares
+    filtered = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
 
-    ew_w = w_fun(data, dates, ew_opt, wealth)
-    ew_pf = pf_ts_fun(ew_w, data, wealth, gam=None)  # Assuming `gam` is predefined or unnecessary
-    ew_pf["type"] = "1/N"
+    # Beregn antallet af rækker pr. eom
+    counts = filtered.groupby('eom').size().reset_index(name='n')
+    filtered = pd.merge(filtered, counts, on='eom', how='left')
+
+    # Udregn optimale vægte: for hver (id, eom) sættes w = 1/n
+    ew_opt = filtered[['id', 'eom']].copy()
+    ew_opt['w'] = 1 / filtered['n']
+
+    # Beregn vægte vha. w_fun
+    weights_data = data[(data['eom'].isin(dates)) & (data['valid'] == True)].copy()
+    ew_w = w_fun(weights_data, dates, ew_opt, wealth)
+
+    # Beregn portefølje-statistikker vha. pf_ts_fun og tilføj porteføljetypen "1/N"
+    ew_pf = pf_ts_fun(ew_w, data, wealth, gam=pf_set['gamma_rel'])
+    ew_pf['type'] = "1/N"
 
     return {"w": ew_w, "pf": ew_pf}
 

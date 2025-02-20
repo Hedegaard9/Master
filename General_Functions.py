@@ -87,63 +87,94 @@ def sigma_gam_adj(sigma_gam, g, cov_type):
 
 # Initial weights
 def initial_weights_new(data, w_type, udf_weights=None):
+    """
+    Beregner initiale vægte baseret på w_type.
+
+    Parametre:
+      - data: Pandas DataFrame med mindst kolonnerne 'id', 'eom' og (afhængigt af w_type) 'me'
+      - w_type: str, en af "vw", "ew", "rand_pos" eller "udf"
+      - udf_weights: DataFrame med brugerdefinerede vægte (bruges, hvis w_type == "udf")
+
+    Returnerer:
+      - pf_w: DataFrame med kolonnerne 'id', 'eom', 'w_start' og 'w'
+    """
+    # Lav en kopi af data for at undgå sideeffekter
+    df = data.copy()
+
     if w_type == "vw":
-        data['w_start'] = data.groupby('eom')['me'].apply(lambda x: x / x.sum())
+        # For hver eom beregnes w_start som me divideret med summen af me i gruppen
+        df['w_start'] = df.groupby('eom')['me'].transform(lambda x: x / x.sum())
+        pf_w = df[['id', 'eom', 'w_start']].copy()
+
     elif w_type == "ew":
-        data['w_start'] = data.groupby('eom').transform(lambda x: 1 / len(x))
+        # For hver eom sættes w_start = 1 / antal elementer i gruppen
+        df['w_start'] = df.groupby('eom')['id'].transform(lambda x: 1 / len(x))
+        pf_w = df[['id', 'eom', 'w_start']].copy()
+
     elif w_type == "rand_pos":
-        data['w_start'] = data.groupby('eom').transform(lambda x: np.random.rand(len(x)) / np.random.rand(len(x)).sum())
+        # Vælg kun de relevante kolonner
+        pf_w = df[['id', 'eom']].copy()
+        # Generér tilfældige tal for hver række
+        pf_w['w_start'] = np.random.uniform(0, 1, size=len(pf_w))
+        # Normalisér inden for hver eom, så summen af w_start = 1
+        pf_w['w_start'] = pf_w.groupby('eom')['w_start'].transform(lambda x: x / x.sum())
+
     elif w_type == "udf":
-        data = data.merge(udf_weights, on=['id', 'eom'], how='left')
-    data.loc[data['eom'] != data['eom'].min(), 'w_start'] = np.nan
-    data['w'] = np.nan
-    return data
+        if udf_weights is None:
+            raise ValueError("udf_weights skal angives, når w_type er 'udf'")
+        # Merge udf_weights med data på id og eom
+        # Her antages det, at udf_weights indeholder kolonnen 'w_start'
+        pf_w = pd.merge(data[['id', 'eom']], udf_weights, on=['id', 'eom'], how='left')
+
+    else:
+        raise ValueError("Ugyldigt w_type angivet.")
+
+    # For alle rækker, hvor eom ikke er den mindste (tidligste) dato, sættes w_start til NaN
+    min_eom = pf_w['eom'].min()
+    pf_w.loc[pf_w['eom'] != min_eom, 'w_start'] = np.nan
+
+    # Tilføj kolonnen 'w' og sæt den til NaN for alle rækker
+    pf_w['w'] = np.nan
+
+    return pf_w
 
 
 def pf_ts_fun(weights, data, wealth, gam):
-    # Første join: Vælg de relevante kolonner fra data og join weights på 'id' og 'eom'
-    comb = pd.merge(weights,
-                    data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']],
-                    on=['id', 'eom'],
-                    how='left')
+    # Join weights med relevante data-kolonner (id, eom, ret_ld1, pred_ld1, lambda)
+    data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']]
+    comb = pd.merge(weights, data_subset, on=['id', 'eom'], how='left')
 
-    # Andet join: Join med wealth-data på 'eom'
-    comb = pd.merge(comb,
-                    wealth[['eom', 'wealth']],
-                    on='eom',
-                    how='left')
+    # Join med wealth for at tilføje 'wealth'-kolonnen (join på eom)
+    wealth_subset = wealth[['eom', 'wealth']]
+    comb = pd.merge(comb, wealth_subset, on='eom', how='left')
 
-    # Gruppér på 'eom' og beregn de ønskede aggregater
-    def agg_func(group):
-        inv = np.abs(group['w']).sum()
-        shorting = np.abs(group.loc[group['w'] < 0, 'w']).sum()
-        turnover = np.abs(group['w'] - group['w_start']).sum()
-        r_val = (group['w'] * group['ret_ld1']).sum()
-        # Antag, at wealth er konstant pr. eom – tag den første værdi
-        unique_wealth = group['wealth'].iloc[0]
-        tc = unique_wealth / 2 * (group['lambda'] * (group['w'] - group['w_start']) ** 2).sum()
+    # Aggregér porteføljestatistikker pr. eom
+    def agg_func(g):
+        inv = np.sum(np.abs(g['w']))
+        shorting = np.sum(np.abs(g.loc[g['w'] < 0, 'w']))
+        turnover = np.sum(np.abs(g['w'] - g['w_start']))
+        r = np.sum(g['w'] * g['ret_ld1'])
+        # For tc antages det, at der er et unikt wealth pr. eom
+        unique_wealth = g['wealth'].unique()[0] if len(g['wealth'].unique()) > 0 else np.nan
+        tc = (unique_wealth / 2) * np.sum(g['lambda'] * ((g['w'] - g['w_start']) ** 2))
         return pd.Series({
             'inv': inv,
             'shorting': shorting,
             'turnover': turnover,
-            'r': r_val,
+            'r': r,
             'tc': tc
         })
 
-    result = comb.groupby('eom').apply(agg_func).reset_index()
+    pf = comb.groupby('eom').apply(agg_func).reset_index()
 
-    # Beregn eom_ret = eom + 1 måned
-    # Her antages det, at eom er af datetime-type; ellers skal du konvertere.
-    if np.issubdtype(result['eom'].dtype, np.datetime64):
-        result['eom_ret'] = result['eom'] + pd.DateOffset(months=1)
-    else:
-        # Hvis ikke, kan du evt. blot sætte eom_ret til eom eller konvertere eom til datetime.
-        result['eom_ret'] = result['eom']
+    # Udregn eom_ret som eom plus 1 måned (forudsætter at eom er en datetime)
+    pf['eom'] = pd.to_datetime(pf['eom'])
+    pf['eom_ret'] = pf['eom'] + pd.DateOffset(months=1)
 
-    # Fjern eom-kolonnen
-    result = result.drop(columns='eom')
+    # Fjern den oprindelige eom-kolonne, hvis ønsket
+    pf = pf.drop(columns=['eom'])
 
-    return result
+    return pf
 
 
 
