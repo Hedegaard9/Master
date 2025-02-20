@@ -203,7 +203,7 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     # Find de hyperparametre med lavest MSE
     opt_idx = val_errors_df["mse"].idxmin()
     opt_hps = val_errors_df.loc[opt_idx]
-    print(f"Optimal g: {opt_hps['g']}, p: {opt_hps['p']}, lambda: {opt_hps['lambda']}")
+    print(f"Optimal g: {opt_hps['g']}, p: {opt_hps['p']}, lambda: {opt_hps['lambda']}, MSE: {opt_hps['mse']}")
 
     # Hent de optimale weights for den valgte g: tag de første p/2 kolonner
     opt_g = str(opt_hps["g"])
@@ -212,14 +212,14 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     opt_W = rff_info[opt_g][:, :half_opt_p]
 
     # Re-fit på train_full data
-    rff_train_full = rff(data["train_full"][feat].values, W=opt_W)
+    rff_train_full = rff(data["train_full"][feat].values, p=opt_p, W=opt_W)
     X_train_full = (opt_p ** -0.5) * np.hstack((rff_train_full["X_cos"], rff_train_full["X_sin"]))
     y_train_full = data["train_full"]["ret_pred"].values
     final_model = Ridge(alpha=opt_hps["lambda"], fit_intercept=False)
     final_model.fit(X_train_full, y_train_full)
 
     # Forudsig på testdata
-    rff_test = rff(data["test"][feat].values, W=opt_W)
+    rff_test = rff(data["test"][feat].values, p=opt_p, W=opt_W)
     X_test = (opt_p ** -0.5) * np.hstack((rff_test["X_cos"], rff_test["X_sin"]))
     preds_test = final_model.predict(X_test)
 
