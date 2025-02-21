@@ -1,39 +1,65 @@
 import numpy as np
 import pandas as pd
 from scipy.linalg import sqrtm
+import matplotlib.pyplot as plt
+from itertools import product
+import seaborn as sns
+import General_Functions
 import importlib
 from General_Functions import initial_weights_new, create_cov, pf_ts_fun, sigma_gam_adj, create_lambda
 sqrtm_cpp = importlib.import_module("sqrtm_cpp")
 
 # Funktion til beregning af M
-def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter):
+def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter): ## ændret denne i port_8 push, hvis problemer
+    # Konverter inputs til NumPy-arrays, hvis de ikke allerede er det
+    sigma_gam = np.array(sigma_gam)
+    lambda_mat = np.array(lambda_mat)
+
     n = lambda_mat.shape[0]
+    print("m_func: n =", n)
+
     g_bar = np.ones(n)
     mu_bar_vec = np.ones(n) * (1 + rf + mu)
 
-    # Beregning af sigma_gr
+    # Beregn sigma_gr
     sigma_gr = (1 + rf + mu) ** -2 * (np.outer(mu_bar_vec, mu_bar_vec) + sigma_gam / gam)
+    print("m_func: sigma_gr shape:", sigma_gr.shape)
 
-    # Beregning af lambda^(-0.5), da lambda er diagonal
+    # Beregn lambda^(-0.5), da lambda er diagonal
     lamb_neg05 = np.diag(np.diag(lambda_mat) ** -0.5)
+    print("m_func: lamb_neg05 shape:", lamb_neg05.shape)
 
-    # Placeholder for x
-    x = w ** -1 * lamb_neg05 @ sigma_gam @ lamb_neg05
+    # Beregn x
+    x = (w ** -1) * (lamb_neg05 @ sigma_gam @ lamb_neg05)
+    print("m_func: x shape:", x.shape)
+
+    # Beregn y
     y = np.diag(1 + np.diag(sigma_gr))
+    print("m_func: y shape:", y.shape)
 
-    # Iteration på F
     sigma_hat = x + np.diag(1 + g_bar)
+    print("m_func: sigma_hat shape:", sigma_hat.shape)
 
-    # Brug C++-implementering af sqrtm, og tag realdelen
+    # Brug C++-implementeringen af sqrtm, og tag realdelen
     sqrt_term = np.real(sqrtm_cpp.sqrtm_cpp(sigma_hat @ sigma_hat - 4 * np.eye(n)))
+    print("m_func: sqrt_term shape:", sqrt_term.shape)
 
     m_tilde = 0.5 * (sigma_hat - sqrt_term)
-    for _ in range(iter):
-        m_tilde = np.linalg.inv(x + y - m_tilde * sigma_gr)  # Elementvis multiplikation
+    print("m_func: initial m_tilde shape:", m_tilde.shape)
 
-    # Output: Beregn elementvis kvadratrod af lambda
-    return lamb_neg05 @ m_tilde @ np.diag(np.sqrt(np.diag(lambda_mat)))
+    # Iteration på F med elementvis multiplikation (hvis det er tilsigtet)
+    for i in range(iter):
+        inv_arg = x + y - m_tilde * sigma_gr  # Elementvis multiplikation
+        print(f"m_func: Iteration {i}, inv_arg shape:", inv_arg.shape)
+        m_tilde = np.linalg.inv(inv_arg)
+        print(f"m_func: Iteration {i}, m_tilde shape:", m_tilde.shape)
 
+    # Beregn elementvis kvadratrod af lambda (dette giver en diagonal matrix)
+    lambda_sqrt = np.diag(np.sqrt(np.diag(lambda_mat)))
+
+    result = lamb_neg05 @ m_tilde @ lambda_sqrt
+    print("m_func: result shape:", result.shape)
+    return result
 
 # Statisk M
 def m_static(sigma_gam, w, lambda_matrix, phi):
@@ -329,11 +355,12 @@ def mv_implement(data, cov_list, wealth, dates, pf_set):
 
 #Static Validation
 def static_val_fun(data, dates, cov_list, lambda_list, wealth, cov_type, gamma_rel, k=None, g=None, u=None, hps=None):
-    static_weights = initial_weights_new(data, w_type="vw")
+    static_weights = General_Functions.initial_weights_new(data, w_type="vw")
     static_weights = pd.merge(static_weights, data[["id", "eom", "tr_ld1", "pred_ld1"]], on=["id", "eom"], how="left")
     static_weights = pd.merge(static_weights, wealth[["eom", "mu_ld1"]], on="eom", how="left")
 
     for d in dates:
+
         if hps is not None:
             # Filtrer alle hyperparametre med eom_ret < d
             hp_filtered = hps[hps["eom_ret"] < pd.Timestamp(d)]
@@ -352,8 +379,8 @@ def static_val_fun(data, dates, cov_list, lambda_list, wealth, cov_type, gamma_r
 
         # Konverter d til en streng nøgle, fx "2019-12-31"
         key = pd.Timestamp(d).strftime('%Y-%m-%d')
-        sigma_gam = create_cov(cov_list[key], ids) * gamma_rel
-        sigma_gam = sigma_gam_adj(sigma_gam, g, cov_type)
+        sigma_gam = General_Functions.create_cov(cov_list[key], ids) * gamma_rel
+        sigma_gam = General_Functions.sigma_gam_adj(sigma_gam, g, cov_type)
 
         id_list = list(ids)
         lambda_vals = [lambda_list[key][i] for i in id_list]
@@ -388,6 +415,7 @@ def static_implement(data_tc, cov_list, lambda_list, rf,
                      k_vec, u_vec, g_vec, cov_type,
                      validation=None, seed=None):
     data_tc = data_tc[(data_tc['valid'] == True) & (data_tc['eom'].isin(dates_oos))].copy()
+    dates_hp = dates_hp[dates_hp >= pd.Timestamp(dates_oos[0].strftime('%Y-%m-%d'))]
     # Sæt seed, hvis nødvendigt
     if seed is not None:
         np.random.seed(seed)
@@ -413,7 +441,7 @@ def static_implement(data_tc, cov_list, lambda_list, rf,
                                       lambda_list=lambda_list, wealth=wealth, gamma_rel=gamma_rel,
                                       k=hp['k'], g=hp['g'], u=hp['u'], cov_type=cov_type)
             # Kald herefter pf_ts_fun på static_w og tilføj kolonner med hyperparametre og hp-nummer
-            pf = pf_ts_fun(static_w, data=data_tc, wealth=wealth, gam=gamma_rel)
+            pf = General_Functions.pf_ts_fun(static_w, data=data_tc, wealth=wealth, gam=gamma_rel)
             pf = pf.copy()  # For at undgå advarsler om SettingWithCopy
             pf['hp_no'] = i
             pf['k'] = hp['k']
@@ -479,12 +507,13 @@ def static_implement(data_tc, cov_list, lambda_list, rf,
                        wealth=wealth, gamma_rel=gamma_rel, hps=optimal_hps, cov_type=cov_type)
 
     # Beregn portefølje-tidsserie og tilføj en 'type'-kolonne
-    pf = pf_ts_fun(w, data=data_tc, wealth=wealth, gam=gamma_rel)
+    pf = General_Functions.pf_ts_fun(w, data=data_tc, wealth=wealth, gam=gamma_rel)
     pf = pf.copy()
     pf['type'] = "Static-ML*"
 
     # Returnér resultaterne som en ordbog
     return {"hps": validation, "best_hps": optimal_hps, "w": w, "pf": pf}
+
 
 #Portfolio-ML Inputs
 def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates, lb, scale,

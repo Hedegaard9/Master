@@ -6,7 +6,7 @@ from pandas.tseries.offsets import MonthEnd
 from Main import settings, features, pf_set
 from datetime import datetime
 import portfolio_choice_functions
-
+import General_Functions
 import prepare_portfolio_data
 import data_run_files
 import Estimate_Covariance_Matrix
@@ -23,8 +23,11 @@ barra_cov = ECM.main()
 wealth = Prepare_Data.main()
 wealth = wealth.dropna(subset=['wealth'])
 
-chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges = prepare_portfolio_data.main(barra_cov)
+chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges, risk_free = prepare_portfolio_data.main(barra_cov)
+dates_m1 = date_ranges["dates_m1"]
+dates_m2 = date_ranges["dates_m2"]
 dates_oos = date_ranges["dates_oos"]
+dates_hp = date_ranges["dates_hp"]
 
 
 # Benchmark portfolios ------------------------------------------
@@ -53,3 +56,23 @@ bm_pfs = pd.concat([tpf["pf"], factor_ml["pf"], ew["pf"], mkt["pf"], rw["pf"], m
 
 # Gem resultatet som en CSV-fil
 bm_pfs.to_csv(f"{output_path}/bms.csv", index=False)
+
+
+static = portfolio_choice_functions.static_implement(
+    data_tc=chars,
+    cov_list=barra_cov,
+    lambda_list=lambda_list,
+    rf=risk_free,              # Data
+    wealth=wealth,
+    mu=pf_set['mu'],
+    gamma_rel=pf_set['gamma_rel'],  # Investor
+    dates_full=dates_m1,
+    dates_oos=dates_oos,
+    dates_hp=dates_hp,
+    hp_years=hp_years,          # Dates
+    k_vec=settings['pf']['hps']['static']['k'],
+    u_vec=settings['pf']['hps']['static']['u'],
+    g_vec=settings['pf']['hps']['static']['g'],
+    cov_type=settings['pf']['hps']['cov_type'],
+    validation=None
+)

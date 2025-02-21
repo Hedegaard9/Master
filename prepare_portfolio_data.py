@@ -161,6 +161,6 @@ def main(barra_cov):
     first_cov_date, hp_years, start_oos = define_important_dates(barra_cov, settings)
     date_ranges = create_date_ranges(settings, first_cov_date, start_oos, hp_years)
 
-    return chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges
+    return chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges, risk_free
 
 
