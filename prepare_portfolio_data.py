@@ -140,7 +140,7 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
         "dates_hp": dates_hp
     }
 
-def main(chars, barra_cov):
+def main(barra_cov):
     get_from_path_model = "./data_test/"
     output_path_usa = "./data_test/usa_test.parquet"
     start_date = "2010-01-31"
@@ -159,6 +159,7 @@ def main(chars, barra_cov):
     lambda_list = create_lambda_list(chars)
     first_cov_date, hp_years, start_oos = define_important_dates(barra_cov, settings)
     date_ranges = create_date_ranges(settings, first_cov_date, start_oos, hp_years)
-    print(date_ranges)
+
+    return chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges
 
 
