@@ -335,68 +335,156 @@ def static_val_fun(data, dates, cov_list, lambda_list, wealth, cov_type, gamma_r
 
     for d in dates:
         if hps is not None:
-            hp = hps[(hps["eom_ret"] < pd.Timestamp(d)) & (hps["eom_ret"] == hps["eom_ret"].max())]
-            g = hp["g"].values[0]
-            u = hp["u"].values[0]
-            k = hp["k"].values[0]
+            # Filtrer alle hyperparametre med eom_ret < d
+            hp_filtered = hps[hps["eom_ret"] < pd.Timestamp(d)]
+            if not hp_filtered.empty:
+                # Vælg den række med den højeste eom_ret (dvs. den seneste før d)
+                hp = hp_filtered.loc[hp_filtered["eom_ret"].idxmax()]
+                g = hp["g"]
+                u = hp["u"]
+                k = hp["k"]
+            else:
+                # Hvis der ikke findes hyperparametre før d, kan du f.eks. springe denne iteration over
+                continue
 
         wealth_t = wealth.loc[wealth["eom"] == pd.Timestamp(d), "wealth"].values[0]
         ids = static_weights.loc[static_weights["eom"] == pd.Timestamp(d), "id"]
-        sigma_gam = create_cov(cov_list[d], ids) * gamma_rel
-        sigma_gam = sigma_gam_adj(sigma_gam, g, cov_type)
-        lambda_matrix = create_lambda(lambda_list[d], ids) * k
 
-        weights = np.linalg.solve(sigma_gam + wealth_t * lambda_matrix,
-                                  (u * static_weights.loc[static_weights["eom"] == pd.Timestamp(d), "pred_ld1"] +
-                                   wealth_t * lambda_matrix @ static_weights.loc[
-                                       static_weights["eom"] == pd.Timestamp(d), "w_start"]))
+        # Konverter d til en streng nøgle, fx "2019-12-31"
+        key = pd.Timestamp(d).strftime('%Y-%m-%d')
+        sigma_gam = create_cov(cov_list[key], ids) * gamma_rel
+        sigma_gam = sigma_gam_adj(sigma_gam, g, cov_type)
+
+        id_list = list(ids)
+        lambda_vals = [lambda_list[key][i] for i in id_list]
+        lambda_matrix = np.diag(lambda_vals) * k
+
+        weights = np.linalg.solve(
+            sigma_gam + wealth_t * lambda_matrix,
+            (u * static_weights.loc[static_weights["eom"] == pd.Timestamp(d), "pred_ld1"] +
+             wealth_t * lambda_matrix @ static_weights.loc[static_weights["eom"] == pd.Timestamp(d), "w_start"])
+        )
 
         static_weights.loc[static_weights["eom"] == pd.Timestamp(d), "w"] = weights
 
-        next_month = dates[dates.index(d) + 1] if dates.index(d) + 1 < len(dates) else None
+        next_index = dates.get_loc(d) + 1
+        next_month = dates[next_index] if next_index < len(dates) else None
         if next_month:
-            next_weights = (weights * (1 + static_weights["tr_ld1"]) / (1 + static_weights["mu_ld1"]))
-            static_weights.loc[static_weights["eom"] == pd.Timestamp(next_month), "w_start"] = next_weights
-            static_weights["w_start"].fillna(0, inplace=True)
+            mask_current = static_weights["eom"] == pd.Timestamp(d)
+            mask_next = static_weights["eom"] == pd.Timestamp(next_month)
+            current_tr = static_weights.loc[mask_current, "tr_ld1"].values
+            current_mu = static_weights.loc[mask_current, "mu_ld1"].values
+            next_weights = weights * (1 + current_tr) / (1 + current_mu)
+            static_weights.loc[mask_next, "w_start"] = next_weights
+            static_weights.loc[:, "w_start"] = static_weights["w_start"].fillna(0)
 
     return static_weights
 
+
 #Static Full Implementation
-def static_implement(data_tc, cov_list, lambda_list, rf, wealth, mu, gamma_rel, dates_full, dates_oos, dates_hp,
-                     hp_years, k_vec, u_vec, g_vec, cov_type, validation=None, seed=None):
-    static_hps = pd.DataFrame([(k, u, g) for k in k_vec for u in u_vec for g in g_vec], columns=["k", "u", "g"])
-    data_rel = data_tc.loc[
-        data_tc["valid"] & data_tc["eom"].isin(dates_hp), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(
-        by=["id", "eom"])
+def static_implement(data_tc, cov_list, lambda_list, rf,
+                     wealth, mu, gamma_rel,
+                     dates_full, dates_oos, dates_hp, hp_years,
+                     k_vec, u_vec, g_vec, cov_type,
+                     validation=None, seed=None):
+    data_tc = data_tc[(data_tc['valid'] == True) & (data_tc['eom'].isin(dates_oos))].copy()
+    # Sæt seed, hvis nødvendigt
+    if seed is not None:
+        np.random.seed(seed)
 
+    # HP grid: opret en DataFrame med alle kombinationer af k, u og g
+    static_hps = pd.DataFrame(list(product(k_vec, u_vec, g_vec)), columns=['k', 'u', 'g'])
+
+    # Udvælg relevant data: filter på 'valid' == True og eom i dates_hp og sorter efter id og eom
+    data_rel = (data_tc.loc[(data_tc['valid']) & (data_tc['eom'].isin(dates_hp)),
+    ['id', 'eom', 'me', 'tr_ld1', 'pred_ld1']]
+                .sort_values(by=['id', 'eom'])
+                )
+
+    # Validering: Hvis validation er None, beregn den
     if validation is None:
-        validation = []
-        for i, hp in static_hps.iterrows():
-            static_w = static_val_fun(data_rel, dates_hp, cov_list, lambda_list, wealth, cov_type, gamma_rel, hp["k"],
-                                      hp["g"], hp["u"])
-            portfolio = pf_ts_fun(static_w, data_tc, wealth, gamma_rel)
-            portfolio["hp_no"] = i
-            portfolio["k"] = hp["k"]
-            portfolio["g"] = hp["g"]
-            portfolio["u"] = hp["u"]
-            validation.append(portfolio)
-        validation = pd.concat(validation)
+        validation_list = []
+        for i in range(len(static_hps)):
+            print(i)
+            # Hent hyperparameterkombinationen
+            hp = static_hps.iloc[i]
+            # Kald funktionen static_val_fun på data_rel med de aktuelle hyperparametre
+            static_w = static_val_fun(data_rel, dates=dates_hp, cov_list=cov_list,
+                                      lambda_list=lambda_list, wealth=wealth, gamma_rel=gamma_rel,
+                                      k=hp['k'], g=hp['g'], u=hp['u'], cov_type=cov_type)
+            # Kald herefter pf_ts_fun på static_w og tilføj kolonner med hyperparametre og hp-nummer
+            pf = pf_ts_fun(static_w, data=data_tc, wealth=wealth, gam=gamma_rel)
+            pf = pf.copy()  # For at undgå advarsler om SettingWithCopy
+            pf['hp_no'] = i
+            pf['k'] = hp['k']
+            pf['g'] = hp['g']
+            pf['u'] = hp['u']
+            validation_list.append(pf)
 
-    validation["cum_var"] = validation.groupby("hp_no")["r"].transform(lambda x: np.cumsum(x ** 2) - np.cumsum(x) ** 2)
-    validation["cum_obj"] = validation.groupby("hp_no").apply(
-        lambda g: g["r"] - g["tc"] - 0.5 * g["cum_var"] * gamma_rel).reset_index(drop=True)
-    validation["rank"] = validation.groupby("eom_ret")["cum_obj"].rank(ascending=False)
+        # Kombinér resultaterne til én DataFrame (svarer til rbindlist)
+        validation = pd.concat(validation_list, ignore_index=True)
 
-    optimal_hps = validation.loc[(validation["rank"] == 1) & (validation["eom_ret"].dt.month == 12)].sort_values(
-        by="eom_ret")
+    # Sorter validation efter hp_no og eom_ret
+    validation.sort_values(by=['hp_no', 'eom_ret'], inplace=True)
 
-    final_weights = static_val_fun(data_tc, dates_oos, cov_list, lambda_list, wealth, cov_type, gamma_rel,
-                                   hps=optimal_hps)
-    final_portfolio = pf_ts_fun(final_weights, data_tc, wealth, gamma_rel)
-    final_portfolio["type"] = "Static-ML*"
+    # Beregn kumulativ varians: cum_var = cummean(r^2) - (cummean(r))^2, beregnet pr. hp_no-gruppe
+    validation['cum_var'] = (validation
+                             .groupby('hp_no')['r']
+                             .apply(lambda x: (x.pow(2).expanding().mean() - x.expanding().mean().pow(2)))
+                             .reset_index(level=0, drop=True)
+                             )
 
-    return {"hps": validation, "best_hps": optimal_hps, "w": final_weights, "pf": final_portfolio}
+    # Beregn kumulativ objektiv funktion: cum_obj = cummean(r - tc - 0.5*cum_var*gamma_rel) pr. hp_no
+    validation['cum_obj'] = (validation
+                             .groupby('hp_no')
+                             .apply(lambda group: (group['r'] - group['tc'] - 0.5 * group['cum_var'] * gamma_rel)
+                                    .expanding().mean())
+                             .reset_index(level=0, drop=True)
+                             )
 
+    # Beregn rang inden for hver eom_ret: højere cum_obj giver lavere rang (rank 1 er bedst)
+    validation['rank'] = (validation
+                          .groupby('eom_ret')['cum_obj']
+                          .rank(ascending=False, method='min')
+                          )
+
+    # Plot: opret en 'name'-kolonne og filtrér for år >= 1981
+    validation = validation.copy()
+    validation['name'] = ("u:" + validation['u'].astype(str) +
+                          " k:" + validation['k'].round(2).astype(str) +
+                          " g:" + validation['g'].astype(str))
+
+    plot_df = validation[validation['eom_ret'].dt.year >= 1981].copy()
+    # For hver hp_no, beregn minimum rank og filtrér for dem med min_rank <= 1
+    plot_df['min_rank'] = plot_df.groupby('hp_no')['rank'].transform('min')
+    plot_df_filtered = plot_df[plot_df['min_rank'] <= 1]
+
+    # Lav plot med seaborn
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=plot_df_filtered, x='eom_ret', y=plot_df_filtered['cum_obj'] * 12, hue='name')
+    plt.xlabel('eom_ret')
+    plt.ylabel('Kumulativ objektiv funktion * 12')
+    plt.title('Static-implement: Kumulativ objektiv funktion pr. hyperparameter')
+    plt.show()
+
+    # Find optimale hyperparametre: vælg rækker med eom_ret i december og rank==1
+    optimal_hps = (validation[(validation['eom_ret'].dt.month == 12) & (validation['rank'] == 1)]
+                   .sort_values(by='eom_ret'))
+
+    # Implementer det endelige portfolio:
+    # Udvælg data_tc for datoer i dates_oos og hvor valid==True
+    w_data = data_tc.loc[(data_tc['valid']) & (data_tc['eom'].isin(dates_oos)),
+    ['id', 'eom', 'me', 'tr_ld1', 'pred_ld1']]
+    w = static_val_fun(w_data, dates=dates_oos, cov_list=cov_list, lambda_list=lambda_list,
+                       wealth=wealth, gamma_rel=gamma_rel, hps=optimal_hps, cov_type=cov_type)
+
+    # Beregn portefølje-tidsserie og tilføj en 'type'-kolonne
+    pf = pf_ts_fun(w, data=data_tc, wealth=wealth, gam=gamma_rel)
+    pf = pf.copy()
+    pf['type'] = "Static-ML*"
+
+    # Returnér resultaterne som en ordbog
+    return {"hps": validation, "best_hps": optimal_hps, "w": w, "pf": pf}
 
 #Portfolio-ML Inputs
 def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates, lb, scale,

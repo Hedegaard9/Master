@@ -284,7 +284,7 @@ def main():
     output_path_usa = "./data_test/usa_test.parquet"
     output_path_market_returns = "data_test/market_returns_test.csv"
     file_path_world_ret = "./Data/world_ret_monthly.csv"
-    start_date = "2010-01-31"
+    start_date = "2009-12-31"
     end_date = "2023-11-30"
 
     # Filtrér ID'er for usa_dsf og usa
