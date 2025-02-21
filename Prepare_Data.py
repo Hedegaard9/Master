@@ -665,7 +665,7 @@ def main():
     print(daily.head())
     print("\ndf_daily_returns head:")
     print(df_daily_returns.head())
-
+    return wealth
 
 if __name__ == "__main__":
     main()
