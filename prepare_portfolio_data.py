@@ -67,18 +67,19 @@ def create_lambda_list(chars):
         chars (pd.DataFrame): Dataframe med aktie-karakteristika inkl. `eom` og `lambda`.
 
     Returns:
-        dict: `lambda_list` hvor nøgler er datoer og værdier er dictionaries af {id: lambda}.
+        dict: `lambda_list` hvor nøgler er datoer i formatet 'YYYY-MM-DD' og værdier er dictionaries af {id: lambda}.
 
     Example: lambda_list = create_lambda_list(chars)
     """
     lambda_dates = chars['eom'].unique()
 
     lambda_list = {
-        str(d): chars[chars['eom'] == d][['id', 'lambda']].set_index('id')['lambda'].to_dict()
+        pd.to_datetime(d).strftime('%Y-%m-%d'): chars[chars['eom'] == d][['id', 'lambda']].set_index('id')['lambda'].to_dict()
         for d in lambda_dates
     }
 
     return lambda_list
+
 
 
 # Important dates ---------------------- virker

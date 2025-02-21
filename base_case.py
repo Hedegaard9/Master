@@ -13,6 +13,9 @@ import Estimate_Covariance_Matrix
 import Prepare_Data
 import Estimate_Covariance_Matrix as ECM
 import Prepare_Data
+# Path to save the portfolios.
+output_path = "./data_test/"
+
 
 # indhent barra_cov
 barra_cov = ECM.main()
@@ -22,6 +25,8 @@ wealth = wealth.dropna(subset=['wealth'])
 
 chars, lambda_list, first_cov_date, hp_years, start_oos, date_ranges = prepare_portfolio_data.main(barra_cov)
 dates_oos = date_ranges["dates_oos"]
+
+
 # Benchmark portfolios ------------------------------------------
 # Markowitz-ML
 tpf = portfolio_choice_functions.tpf_implement(data=chars, cov_list=barra_cov, wealth=wealth, dates=dates_oos, gam=pf_set["gamma_rel"])
@@ -44,7 +49,7 @@ mv = portfolio_choice_functions.mv_implement(data=chars, cov_list=barra_cov ,wea
 
 
 # Saml porteføljerne i én DataFrame
-#bm_pfs = pd.concat([tpf["pf"], factor_ml["pf"], ew["pf"], mkt["pf"], rw["pf"], mv["pf"]], ignore_index=True)
+bm_pfs = pd.concat([tpf["pf"], factor_ml["pf"], ew["pf"], mkt["pf"], rw["pf"], mv["pf"]], ignore_index=True)
 
 # Gem resultatet som en CSV-fil
-#bm_pfs.to_csv(f"{output_path}/bms.csv", index=False)
+bm_pfs.to_csv(f"{output_path}/bms.csv", index=False)
