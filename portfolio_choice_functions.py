@@ -86,26 +86,69 @@ def w_fun(data, dates, w_opt, wealth):
 
 # Implementering af tangensportefølje
 def tpf_implement(data, cov_list, wealth, dates, gam):
-    data = data[(data['valid'] == True) & (data['eom'].isin(dates))].copy()
-    # Konverter eom og eom_pred_last til datetime, hvis de ikke allerede er det
-    data["eom"] = pd.to_datetime(data["eom"])
-    data["eom_pred_last"] = pd.to_datetime(data["eom_pred_last"])
+    """
+    Beregner tangency portfolio weights og porteføljestatistikker.
 
+    Parametre:
+      - data: DataFrame med kolonnerne 'id', 'eom', 'me', 'tr_ld1', 'pred_ld1' og 'valid'
+      - cov_list: dictionary med nøgler som datoer (som strings, fx '2019-12-31') og værdier,
+                  hvor hvert element er en dictionary med nøglerne 'fct_load', 'fct_cov' og 'ivol_vec'
+      - wealth: DataFrame med kolonnerne 'eom', 'mu_ld1' og 'wealth'
+      - dates: liste over datoer (som pd.Timestamp eller strings)
+      - gam: risikoaversion parameter
 
-    data_rel = data.loc[data["valid"] & data["eom"].isin(dates), ["id", "eom", "me", "tr_ld1", "pred_ld1"]].sort_values(
-        by=["id", "eom"])
-    data_split = {key: group for key, group in data_rel.groupby("eom")}
-    tpf_opt = []
+    Returnerer:
+      - en dictionary med nøglerne "w" (de faktiske vægte) og "pf" (porteføljestatistikker)
+
+    #Eksempel på brug
+    # tpf = tpf_implement(data=chars, cov_list=barra_cov, wealth=wealth, dates=dates_oos, gam=pf_set['gamma_rel'])
+    """
+    # Filtrer data for gyldige rækker med eom i dates
+    data_rel = data[(data['valid'] == True) & (data['eom'].isin(dates))][['id', 'eom', 'me', 'tr_ld1', 'pred_ld1']]
+    data_rel = data_rel.sort_values(by=['id', 'eom'])
+
+    # Opdel data_rel i grupper pr. eom
+    data_split = {d: df for d, df in data_rel.groupby('eom')}
+
+    tpf_opt_list = []
+
     for d in dates:
-        data_sub = data_split[d]
-        ids = data_sub["id"]
-        sigma = create_cov(cov_list[d], ids)
-        weights = np.linalg.solve(sigma, data_sub["pred_ld1"]) / gam
-        tpf_opt.append(pd.DataFrame({"id": data_sub["id"], "eom": d, "w": weights}))
-    tpf_opt = pd.concat(tpf_opt)
+        # Konverter d til string, hvis d er en pd.Timestamp (cov_list-nøglerne forventes som strings)
+        if isinstance(d, pd.Timestamp):
+            d_key = d.strftime('%Y-%m-%d')
+        else:
+            d_key = d
+
+        data_sub = data_split.get(d)
+        if data_sub is None or data_sub.empty:
+            continue
+
+        ids = data_sub['id'].tolist()
+
+        # Brug standalone funktionen create_cov her
+        sigma = create_cov(cov_list[d_key], ids=ids)
+
+        # Hent prediktioner for den aktuelle dato
+        pred_vector = data_sub['pred_ld1'].values
+
+        # Beregn de optimale vægte: w = (1/gam) * inv(sigma) * pred_vector
+        weights = (1 / gam) * np.linalg.solve(sigma, pred_vector)  # Her beregnes de optimale vægte
+
+        temp_df = data_sub[['id', 'eom']].copy()
+        temp_df['w'] = weights
+        tpf_opt_list.append(temp_df)
+
+    if tpf_opt_list:
+        tpf_opt = pd.concat(tpf_opt_list, ignore_index=True)
+    else:
+        tpf_opt = pd.DataFrame(columns=['id', 'eom', 'w'])
+
+    # Beregn de faktiske vægte vha. w_fun (forventes defineret et andet sted)
     tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
+    # Beregn porteføljestatistikker vha. pf_ts_fun (forventes defineret et andet sted)
     tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
-    tpf_pf["type"] = "Markowitz-ML"
+    tpf_pf['type'] = "Markowitz-ML"
+
     return {"w": tpf_w, "pf": tpf_pf}
 
 
