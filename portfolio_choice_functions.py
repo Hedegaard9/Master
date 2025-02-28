@@ -23,42 +23,42 @@ def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter): ## ændret denne i port
 
     # Beregn sigma_gr
     sigma_gr = (1 + rf + mu) ** -2 * (np.outer(mu_bar_vec, mu_bar_vec) + sigma_gam / gam)
-    print("m_func: sigma_gr shape:", sigma_gr.shape)
+#    print("m_func: sigma_gr shape:", sigma_gr.shape)
 
     # Beregn lambda^(-0.5), da lambda er diagonal
     lamb_neg05 = np.diag(np.diag(lambda_mat) ** -0.5)
-    print("m_func: lamb_neg05 shape:", lamb_neg05.shape)
+#    print("m_func: lamb_neg05 shape:", lamb_neg05.shape)
 
     # Beregn x
     x = (w ** -1) * (lamb_neg05 @ sigma_gam @ lamb_neg05)
-    print("m_func: x shape:", x.shape)
+#    print("m_func: x shape:", x.shape)
 
     # Beregn y
     y = np.diag(1 + np.diag(sigma_gr))
-    print("m_func: y shape:", y.shape)
+#    print("m_func: y shape:", y.shape)
 
     sigma_hat = x + np.diag(1 + g_bar)
-    print("m_func: sigma_hat shape:", sigma_hat.shape)
+#    print("m_func: sigma_hat shape:", sigma_hat.shape)
 
     # Brug C++-implementeringen af sqrtm, og tag realdelen
     sqrt_term = np.real(sqrtm_cpp.sqrtm_cpp(sigma_hat @ sigma_hat - 4 * np.eye(n)))
-    print("m_func: sqrt_term shape:", sqrt_term.shape)
+#    print("m_func: sqrt_term shape:", sqrt_term.shape)
 
     m_tilde = 0.5 * (sigma_hat - sqrt_term)
-    print("m_func: initial m_tilde shape:", m_tilde.shape)
+#    print("m_func: initial m_tilde shape:", m_tilde.shape)
 
     # Iteration på F med elementvis multiplikation (hvis det er tilsigtet)
     for i in range(iter):
         inv_arg = x + y - m_tilde * sigma_gr  # Elementvis multiplikation
-        print(f"m_func: Iteration {i}, inv_arg shape:", inv_arg.shape)
+        #print(f"m_func: Iteration {i}, inv_arg shape:", inv_arg.shape)
         m_tilde = np.linalg.inv(inv_arg)
-        print(f"m_func: Iteration {i}, m_tilde shape:", m_tilde.shape)
+        #print(f"m_func: Iteration {i}, m_tilde shape:", m_tilde.shape)
 
     # Beregn elementvis kvadratrod af lambda (dette giver en diagonal matrix)
     lambda_sqrt = np.diag(np.sqrt(np.diag(lambda_mat)))
 
     result = lamb_neg05 @ m_tilde @ lambda_sqrt
-    print("m_func: result shape:", result.shape)
+    #print("m_func: result shape:", result.shape)
     return result
 
 # Statisk M
@@ -371,7 +371,6 @@ def static_val_fun(data, dates, cov_list, lambda_list, wealth, cov_type, gamma_r
                 u = hp["u"]
                 k = hp["k"]
             else:
-                # Hvis der ikke findes hyperparametre før d, kan du f.eks. springe denne iteration over
                 continue
 
         wealth_t = wealth.loc[wealth["eom"] == pd.Timestamp(d), "wealth"].values[0]
