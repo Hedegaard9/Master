@@ -128,7 +128,11 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
 
     dates_m1 = pd.date_range(start=settings['split']['train_end'], end=end_date, freq='ME')
 
-    dates_m2 = pd.date_range(start=first_cov_date + pd.DateOffset(months=pf_set['lb_hor'] + 1), end=end_date, freq='ME')
+    dates_m2 = pd.date_range(
+        start=first_cov_date + MonthEnd(pf_set['lb_hor'] + 1),
+        end=end_date,
+        freq=MonthEnd()
+    )
 
     dates_oos = pd.date_range(start=start_date_oos, end=end_date, freq='ME')
 
