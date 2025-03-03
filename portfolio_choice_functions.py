@@ -514,105 +514,339 @@ def static_implement(data_tc, cov_list, lambda_list, rf,
     return {"hps": validation, "best_hps": optimal_hps, "w": w, "pf": pf}
 
 
+def pfml_search_coef(pfml_input, p_vec, l_vec, hp_years, orig_feat):  # virker kun for et p so far.
+    # Konverter nøglerne (datoer) til datetime-objekter
+    reals = pfml_input["reals"]
+    # Vi antager, at nøglerne kan konverteres med pd.to_datetime
+    d_all = {pd.to_datetime(k): k for k in reals.keys()}
+
+    # Bestem end_bef = min(hp_years) - 1 (fx hvis det mindste hp_year er 2016, så er end_bef 2015)
+    end_bef = 2021  # - 1
+    # Vælg træningsdata før: datoer < (min(hp_years)-2)-12-31
+    cutoff_date = pd.to_datetime(f"{end_bef - 1}-12-31")
+    train_bef = {k: reals[d_all[k]] for k in d_all if k < cutoff_date}
+
+    # Beregn sum af r_tilde over træningssættet.
+    # Her antages det, at hver x['r_tilde'] er en pandas Series med index svarende til feature-navne.
+    r_tilde_list = [item['r_tilde'] for item in train_bef.values()]
+    # Summering: her benyttes sum() til pandas Series (forudsætter, at listen ikke er tom)
+    r_tilde_sum = sum(r_tilde_list) if r_tilde_list else pd.Series(0)
+
+    # Tilsvarende: sum af 'denom'-matricer (antages at være pandas DataFrames med feature-navne som index/columns)
+    denom_list = [item['denom'] for item in train_bef.values()]
+    denom_raw_sum = sum(denom_list) if denom_list else pd.DataFrame(0)
+
+    # n er antallet af observationer i train_bef
+    n = len(train_bef)  # skal evt ændres
+
+    # Sorter hp_years, og opret en ordbog til at holde koefficienterne
+    hp_years = sorted(hp_years)
+    coef_list = {}
+
+    # For hvert hp_year
+    for hp in hp_years:
+        # Udvælg nye træningsobservationer: datoer i intervallet
+        # [ (hp-2)-12-31, (hp-1)-11-30 ]
+        lower_bound = pd.to_datetime(f"{hp - 2}-12-31")
+        upper_bound = pd.to_datetime(f"{hp - 1}-11-30")
+
+        train_new = {k: reals[d_all[k]] for k in d_all if lower_bound <= k <= upper_bound}
+
+        # Opdater antallet af observationer
+        n += len(train_new)
+        # Opdater r_tilde_sum med de nye r_tilde-værdier
+        r_tilde_new = sum([item['r_tilde'] for item in train_new.values()]) if len(train_new) > 0 else 0
+        r_tilde_sum = r_tilde_sum + r_tilde_new
+
+    # Opdater denom-summen
+    denom_raw_new = sum([item['denom'] for item in train_new.values()]) if len(train_new) > 0 else 0
+    denom_raw_sum = denom_raw_sum + denom_raw_new
+
+    # For hvert p i p_vec, beregn de tilhørende koefficienter
+    coef_by_hp = {}
+    # Hent feature-navnene givet p og om de originale features skal medtages
+    feat_p = pfml_feat_fun(p, orig_feat)
+    # r_tilde_sub: udtræk de features fra r_tilde_sum og divider med n
+    r_tilde_sum = pd.Series(r_tilde_sum, index=all_feat)
+
+    r_tilde_sub = r_tilde_sum.loc[feat_p] / n
+    # denom_sub: udtræk de relevante rækker og kolonner fra denom_raw_sum og divider med n
+    denom_raw_sum.index = all_feat
+    denom_raw_sum.columns = all_feat
+
+    denom_sub = denom_raw_sum.loc[feat_p, feat_p] / n
+
+    results = {}
+    for l in l_vec:
+        M = denom_sub + l * np.eye(len(feat_p))
+        # Løs det lineære system: M * coef = r_tilde_sub
+        coef = np.linalg.solve(M.values, r_tilde_sub.values)
+        # Gem resultatet som en pandas Series med index = feat_p
+        results[l] = pd.Series(coef, index=feat_p)
+    # Gem resultaterne for den aktuelle p-værdi
+    coef_by_hp[p] = results
+    # Gem koefficienterne for det aktuelle hp_year, brug hp som streng
+    coef_list[str(hp)] = coef_by_hp
+
+    return coef_list
+
+
+
+def pfml_feat_fun(p, orig_feat, features=None):
+    """
+    Returnerer en liste af feature-navne.
+
+    Parametre:
+      p         : Antal RFF-features (skal være deleligt med 2). Hvis p er 0, bruges ingen RFF-features.
+      orig_feat : Bool – om de originale features skal inkluderes.
+      features  : Liste af originale feature-navne. Skal gives, hvis orig_feat er True.
+
+    Returnerer:
+      En liste med feature-navne.
+    """
+    feat = ["constant"]
+    if p != 0:
+        half_p = p // 2
+        feat.extend([f"rff{i}_cos" for i in range(1, half_p + 1)])
+        feat.extend([f"rff{i}_sin" for i in range(1, half_p + 1)])
+    if orig_feat and features is not None:
+        feat.extend(features)
+    return feat
+
+
 #Portfolio-ML Inputs
 def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates, lb, scale,
                    risk_free, features, rff_feat, seed, p_max, g, add_orig, iter, balanced):
-    np.random.seed(seed)
-
-    # Lookback dates
-    dates_lb = pd.date_range(start=min(dates) - pd.DateOffset(months=lb + 1), end=max(dates), freq="M")
-
-    # Generate random features if required
+    # --- Lookback-datoer ---
+    min_date = min(dates)
+    max_date = max(dates)
+    start_date = (min_date + pd.Timedelta(days=1)) - MonthEnd(lb + 1)
+    dates_lb = pd.date_range(start=start_date, end=max_date, freq=MonthEnd())
+    print(dates_lb)
+    # --- Oprettelse af Random Fourier Features ---
     if rff_feat:
-        rff_x = generate_random_features(data_tc[features], p_max, g)
-        rff_w = rff_x['weights']
-        rff_features = rff_x['features']
-        rff_features.columns = [f"rff{i + 1}" for i in range(rff_features.shape[1])]
-        data = pd.concat([data_tc[["id", "eom", "valid", "ret_ld1", "tr_ld0", "mu_ld0"]], rff_features], axis=1)
-        feat_new = rff_features.columns.tolist()
+        np.random.seed(seed)
+        X_features = data_tc[features].values
+        rff_x = rff(X_features, p=p_max, g=g)
+        rff_w = rff_x['W']
+        X_cos = rff_x['X_cos']
+        X_sin = rff_x['X_sin']
+        rff_features = np.hstack([X_cos, X_sin])
+        num = p_max // 2
+        rff_colnames = [f"rff{i}_cos" for i in range(1, num + 1)] + [f"rff{i}_sin" for i in range(1, num + 1)]
+        rff_df = pd.DataFrame(rff_features, columns=rff_colnames, index=data_tc.index)
+        data = pd.concat([data_tc[['id', 'eom', 'valid', 'ret_ld1', 'tr_ld0', 'mu_ld0']].reset_index(drop=True),
+                          rff_df.reset_index(drop=True)], axis=1)
+        feat_new = list(rff_df.columns)
         if add_orig:
-            data = pd.concat([data, data_tc[features]], axis=1)
-            feat_new += features
+            data = pd.concat([data, data_tc[features].reset_index(drop=True)], axis=1)
+            feat_new = feat_new + features
     else:
-        data = data_tc[["id", "eom", "valid", "ret_ld1", "tr_ld0", "mu_ld0"] + features]
-        feat_new = features
+        cols = ['id', 'eom', 'valid', 'ret_ld1', 'tr_ld0', 'mu_ld0'] + features
+        data = data_tc[cols].copy()
+        feat_new = features.copy()
 
-    feat_cons = feat_new + ["constant"]
+    # Konverter 'eom' til string-format så vi får samme format i hele funktionen
+    data['eom'] = pd.to_datetime(data['eom']).dt.strftime('%Y-%m-%d')
 
-    # Scaling
+    feat_cons = feat_new + ['constant']
+
+    # --- Tilføjelse af scales ---
     if scale:
-        scales = []
+        scales_list = []
         for d in dates_lb:
-            sigma = create_cov(cov_list[d])
-            diag_vol = np.sqrt(np.diag(sigma))
-            scales.append(pd.DataFrame({"id": sigma.index, "eom": d, "vol_scale": diag_vol}))
-        scales = pd.concat(scales)
-        data = data.merge(scales, on=["id", "eom"], how="left")
-        data["vol_scale"] = data.groupby("eom")["vol_scale"].transform(lambda x: x.fillna(x.median()))
+            d_str = d.strftime('%Y-%m-%d')
+            sigma = General_Functions.create_cov(cov_list[d_str])
+            if hasattr(sigma, 'values'):
+                sigma_vals = sigma.values
+                ids_sigma = sigma.index.astype(float)
+            else:
+                sigma_vals = sigma
+                ids_sigma = np.arange(sigma.shape[0])
+            diag_vol = np.sqrt(np.diag(sigma_vals))
+            df_scales = pd.DataFrame({
+                'id': ids_sigma,
+                'eom': d_str,  # Brug d_str for konsistens
+                'vol_scale': diag_vol
+            })
+            scales_list.append(df_scales)
+        scales_df = pd.concat(scales_list, ignore_index=True)
+        data = pd.merge(data, scales_df, on=['id', 'eom'], how='left')
+        data['vol_scale'] = data.groupby('eom')['vol_scale'].transform(lambda x: x.fillna(x.median()))
 
-    # Balanced data
+    # --- Justering ved balanced panel ---
     if balanced:
-        data[feat_new] = data.groupby("eom")[feat_new].transform(lambda x: x - x.mean())
-        data["constant"] = 1
-        data[feat_cons] = data.groupby("eom")[feat_cons].transform(lambda x: x / np.sqrt((x ** 2).sum()))
+        for col in feat_new:
+            data[col] = data.groupby('eom')[col].transform(lambda x: x - x.mean())
+        data['constant'] = 1
+        for col in feat_cons:
+            data[col] = data.groupby('eom')[col].transform(
+                lambda x: x * np.sqrt(1 / np.sum(x ** 2)) if np.sum(x ** 2) != 0 else 0)
 
-    # Prepare signals and realizations
-    inputs = {}
+    # --- Beregning af signaler og realiseringer for hvert dato ---
+    reals_dict = {}
+    signal_t_dict = {}
+
     for d in dates:
         if d.year % 10 == 0 and d.month == 1:
             print(f"--> PF-ML inputs: {d}")
 
-        data_ret = data[(data["valid"]) & (data["eom"] == d)][["id", "ret_ld1"]]
-        ids = data_ret["id"].values
-        sigma = create_cov(cov_list[d], ids)
-        lambda_matrix = create_lambda(lambda_list[d], ids)
-        w = wealth.loc[wealth["eom"] == d, "wealth"].values[0]
-        rf = risk_free.loc[risk_free["eom"] == d, "rf"].values[0]
-        m = m_func(w=w, mu=mu, rf=rf, sigma_gam=sigma * gamma_rel, gam=gamma_rel, lambda_matrix=lambda_matrix,
-                   iter=iter)
+        d_str = d.strftime('%Y-%m-%d')
+        print("d", d)
+        print("d_str", d_str)
+        data_ret = data[(data['valid'] == True) & (data['eom'] == d_str)][['id', 'ret_ld1']]
+        ids = data_ret['id'].unique()  # ids som ints
+        n = len(ids)
+        r_vec = data_ret['ret_ld1'].values
 
-        # Prepare signals
-        data_sub = data[(data["id"].isin(ids)) & (data["eom"] >= d - pd.DateOffset(months=lb))]
+        # Brug de korrekte key-typer til både sigma og lambda
+        sigma = General_Functions.create_cov(cov_list[d_str], ids=ids)
+        lambda_series = pd.Series(lambda_list[d_str])
+        lambda_mat = General_Functions.create_lambda(lambda_series, ids=ids)
+
+        w = wealth.loc[wealth['eom'] == d_str, 'wealth'].iloc[0]
+        rf = risk_free.loc[risk_free['eom'] == d_str, 'rf'].iloc[0]
+        m = m_func(w=w, mu=mu, rf=rf, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
+                   lambda_mat=lambda_mat, iter=iter)
+
+        # Brug MonthEnd til at beregne lower_bound – konverter til string-format
+        lower_bound = (d - MonthEnd(lb)).strftime('%Y-%m-%d')
+        data_sub = data[(data['id'].isin(ids)) & (data['eom'] >= lower_bound) & (data['eom'] <= d_str)].copy()
+
         if not balanced:
-            data_sub[feat_new] = data_sub.groupby("eom")[feat_new].transform(lambda x: x - x.mean())
-            data_sub["constant"] = 1
-            data_sub[feat_cons] = data_sub.groupby("eom")[feat_cons].transform(lambda x: x / np.sqrt((x ** 2).sum()))
+            for col in feat_new:
+                data_sub[col] = data_sub.groupby('eom')[col].transform(lambda x: x - x.mean())
+            data_sub['constant'] = 1
+            for col in feat_cons:
+                data_sub[col] = data_sub.groupby('eom')[col].transform(
+                    lambda x: x * np.sqrt(1 / np.sum(x ** 2)) if np.sum(x ** 2) != 0 else 0)
 
+        data_sub = data_sub.sort_values(by=['eom', 'id'], ascending=[False, True])
+        # Gruppér efter 'eom' – vi konverterer gruppenøglerne til string-format for konsistens
+        groups = {k: group for k, group in data_sub.groupby('eom')}
+
+        # Beregn signaler med diagnose: udskriv kun hvis NaN, Inf, tom DataFrame eller tomt index
         signals = {}
-        for d_new, group in data_sub.groupby("eom"):
-            s = group[feat_cons].to_numpy()
+        for eom_val, group in groups.items():
+            if group.empty or group.index.empty:
+                print(f"Advarsel: Gruppe for {eom_val} er tom!")
+            s = group[feat_cons].values
             if scale:
-                s = np.diag(1 / group["vol_scale"].values) @ s
-            signals[d_new] = s
+                s = np.diag(1 / group['vol_scale'].values) @ s
+            # Tjek for NaN eller Inf
+            if np.isnan(s).any():
+                print(f"Advarsel: Signal for {eom_val} indeholder NaN. Form: {s.shape}")
+            if np.isinf(s).any():
+                print(f"Advarsel: Signal for {eom_val} indeholder Inf. Form: {s.shape}")
+            signals[eom_val] = s
+        print("signaler", signals)
+        d_key = d_str  # d_str er allerede i '%Y-%m-%d'-format
+        signal_current = signals.get(d_key, None)
+        if signal_current is None:
+            print(f"Advarsel: Ingen signal fundet for {d_key}.")
+            continue
+        elif np.isnan(signal_current).any() or np.isinf(signal_current).any():
+            print(f"Advarsel: Signal for {d_key} indeholder NaN eller Inf, springer denne dato over.")
+            continue
 
-        # Weighted signals (omega)
-        omega, const, omega_l1, const_l1 = 0, 0, 0, 0
-        for i in range(lb + 1):
-            d_new = d - pd.DateOffset(months=i)
-            d_new_l1 = d_new - pd.DateOffset(months=1)
-            s = signals.get(d_new, np.zeros((len(ids), len(feat_cons))))
-            s_l1 = signals.get(d_new_l1, np.zeros((len(ids), len(feat_cons))))
+        # Beregn gtm for hver gruppe
+        gtm = {}
+        for eom_val, group in groups.items():
+            gt = (1 + group['tr_ld0']) / (1 + group['mu_ld0'])
+            gt = gt.fillna(1).values
+            gtm[eom_val] = m @ np.diag(gt)
 
-            omega += m @ s
-            const += m
-            omega_l1 += m @ s_l1
-            const_l1 += m
+        # Aggregér gtm over lookback-perioden
+        n_stocks = n
+        gtm_agg = {}
+        gtm_agg_l1 = {}
+        gtm_agg[d_key] = np.eye(n_stocks)
+        gtm_agg_l1[d_key] = np.eye(n_stocks)
+        for i in range(1, lb + 1):
+            d_i = (d - MonthEnd(i)).strftime('%Y-%m-%d')
+            # DEBUG: Udskriv unikke 'eom'-datoer for denne lookback-dato
+            lookback_date = pd.to_datetime(d_i)
+            unique_dates = data[data['eom'] == lookback_date.strftime('%Y-%m-%d')]['eom'].unique()
+            print(f"Lookup for lookback-dato: {d_i} - Unikke eom-datoer fundet: {unique_dates}")
 
-        omega = np.linalg.solve(const, omega)
-        omega_l1 = np.linalg.solve(const_l1, omega_l1)
-        omega_chg = omega - np.diag((1 + data_sub["tr_ld0"]) / (1 + data_sub["mu_ld0"])) @ omega_l1
+            if d_i in gtm:
+                gtm_agg[d_i] = gtm_agg[list(gtm_agg.keys())[-1]] @ gtm[d_i]
+            else:
+                gtm_agg[d_i] = gtm_agg[list(gtm_agg.keys())[-1]]
+            d_i_l1 = (d - MonthEnd(i + 1)).strftime('%Y-%m-%d')
+            if d_i_l1 in gtm:
+                gtm_agg_l1[d_i] = gtm_agg_l1[list(gtm_agg_l1.keys())[-1]] @ gtm[d_i_l1]
+            else:
+                gtm_agg_l1[d_i] = gtm_agg_l1[list(gtm_agg_l1.keys())[-1]]
 
-        r_tilde = omega.T @ data_ret["ret_ld1"].values
-        risk = gamma_rel * (omega.T @ sigma @ omega)
-        tc = w * (omega_chg.T @ lambda_matrix @ omega_chg)
-        denom = risk + tc
+        # Summering over lookback: opbyg omega og konstanter
+        omega_sum = None
+        const_sum = None
+        omega_l1_sum = None
+        const_l1_sum = None
+        for i in range(0, lb + 1):
+            d_i = (d - MonthEnd(i)).strftime('%Y-%m-%d')
+            s_i = signals.get(d_i, None)
+            if s_i is None:
+                print(f"Advarsel: Ingen signal fundet for lookback-dato d_i {d_i}")
+                term = np.zeros((n_stocks, len(feat_cons)))
+            else:
+                term = gtm_agg.get(d_i, np.eye(n_stocks)) @ s_i
+            if omega_sum is None:
+                omega_sum = term
+                const_sum = gtm_agg.get(d_i, np.eye(n_stocks))
+            else:
+                omega_sum = omega_sum + term
+                const_sum = const_sum + gtm_agg.get(d_i, np.eye(n_stocks))
 
-        inputs[d] = {
-            "reals": {"r_tilde": r_tilde, "denom": denom, "risk": risk, "tc": tc},
-            "signal_t": signals.get(d, np.zeros((len(ids), len(feat_cons))))
+            d_i_l1 = (d - MonthEnd(i + 1)).strftime('%Y-%m-%d')
+            s_i_l1 = signals.get(d_i_l1, None)
+            if s_i_l1 is None:
+                print(f"Advarsel: Ingen signal fundet for lookback-dato d_i_l1 {d_i_l1}")
+                term_l1 = np.zeros((n_stocks, len(feat_cons)))
+            else:
+                term_l1 = gtm_agg_l1.get(d_i_l1, np.eye(n_stocks)) @ s_i_l1
+            if omega_l1_sum is None:
+                omega_l1_sum = term_l1
+                const_l1_sum = gtm_agg_l1.get(d_i_l1, np.eye(n_stocks))
+            else:
+                omega_l1_sum = omega_l1_sum + term_l1
+                const_l1_sum = const_l1_sum + gtm_agg_l1.get(d_i_l1, np.eye(n_stocks))
+
+        # Løs de lineære systemer
+        omega_final = np.linalg.solve(const_sum, omega_sum)
+        omega_l1_final = np.linalg.solve(const_l1_sum, omega_l1_sum)
+
+        # Beregn gt for den aktuelle gruppe (d)
+        if d_key in signals:
+            group_d = groups.get(d_key, None)
+            if group_d is None:
+                gt_vec = np.ones(n_stocks)
+            else:
+                gt_vec = ((1 + group_d['tr_ld0']) / (1 + group_d['mu_ld0'])).values
+            gt_mat = np.diag(gt_vec)
+        else:
+            gt_mat = np.eye(n_stocks)
+
+        omega_chg = omega_final - gt_mat @ omega_l1_final
+
+        # --- Realiseringer ---
+        r_tilde = omega_final.T @ r_vec
+        risk_val = gamma_rel * (omega_final.T @ sigma @ omega_final)
+        tc_val = w * (omega_chg.T @ lambda_mat @ omega_chg)
+        denom = risk_val + tc_val
+
+        reals = {
+            "r_tilde": r_tilde.item() if np.isscalar(r_tilde) or r_tilde.size == 1 else r_tilde,
+            "denom": denom.item() if np.isscalar(denom) or denom.size == 1 else denom,
+            "risk": risk_val.item() if np.isscalar(risk_val) or risk_val.size == 1 else risk_val,
+            "tc": tc_val.item() if np.isscalar(tc_val) or tc_val.size == 1 else tc_val
         }
 
-    return inputs
+        reals_dict[d_key] = reals
+        signal_t_dict[d_key] = signals.get(d_key, None)
+
+    return {"reals": reals_dict, "signal_t": signal_t_dict, "rff_w": rff_w if rff_feat else None}
 
 
 
