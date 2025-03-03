@@ -81,7 +81,7 @@ def process_cluster_data(chars, daily, cluster_labels_path, factor_details_path)
     # Kombiner med de oprindelige data
     cluster_data_m = cluster_data_m[["id", "eom", "size_grp", "ff12"]].copy()
     cluster_data_m["eom_ret"] = cluster_data_m["eom"] + pd.DateOffset(months=1)
-    cluster_data_m["eom_ret"] = cluster_data_m["eom_ret"] + pd.offsets.MonthEnd(0)  # Sikrer, at det er sidste dag i måneden
+    cluster_data_m["eom_ret"] = cluster_data_m["eom_ret"] + MonthEnd(0)
 
     # Merge cluster rankings
     cluster_data_m = pd.concat([cluster_data_m, cluster_ranks_df], axis=1)
@@ -457,7 +457,7 @@ def process_spec_risk_m(fct_dates, spec_risk):
     spec_risk_res_vol = spec_risk_res_vol[["id", "date", "res_vol"]]
 
     # 5. Beregn eom_ret (sidste dag i måneden)
-    spec_risk_res_vol["eom_ret"] = (spec_risk_res_vol["date"] + pd.offsets.MonthBegin(1)) - pd.Timedelta(days=1)
+    spec_risk_res_vol["eom_ret"] = spec_risk_res_vol["date"] + MonthEnd(0)
 
     # 6. Find den maksimale dato for hver kombination af id og eom_ret
     spec_risk_res_vol["max_date"] = spec_risk_res_vol.groupby(["id", "eom_ret"])["date"].transform("max")
