@@ -33,17 +33,34 @@ colours_theme = [
 # Custom color palette
 sns.set_palette(sns.color_palette(colours_theme))
 
+#pf_order = [
+#    "Portfolio-ML", "Multiperiod-ML", "Multiperiod-ML*",
+#    "Static-ML", "Static-ML*", "Market", "1/N",
+#    "Minimum Variance", "Factor-ML", "Rank-ML", "Markowitz-ML"
+#]
+
 pf_order = [
-    "Portfolio-ML", "Multiperiod-ML", "Multiperiod-ML*",
+    "Portfolio-ML",
     "Static-ML", "Static-ML*", "Market", "1/N",
     "Minimum Variance", "Factor-ML", "Rank-ML", "Markowitz-ML"
 ]
+
+#pf_order_new = [
+#    "Portfolio-ML", "Multiperiod-ML*", "Static-ML*", "Multiperiod-ML",
+#    "Static-ML", "Markowitz-ML", "Rank-ML", "Factor-ML",
+#    "Minimum Variance", "1/N", "Market"
+#]
+
 pf_order_new = [
-    "Portfolio-ML", "Multiperiod-ML*", "Static-ML*", "Multiperiod-ML",
+    "Portfolio-ML", "Static-ML*",
     "Static-ML", "Markowitz-ML", "Rank-ML", "Factor-ML",
     "Minimum Variance", "1/N", "Market"
 ]
-main_types = ["Portfolio-ML", "Multiperiod-ML*", "Static-ML*", "Factor-ML", "Markowitz-ML"]
+
+
+#main_types = ["Portfolio-ML", "Multiperiod-ML*", "Static-ML*", "Factor-ML", "Markowitz-ML"]
+
+main_types = ["Portfolio-ML", "Static-ML*", "Factor-ML", "Markowitz-ML"]
 
 cluster_order = [
     "Accruals", "Debt Issuance", "Investment", "Short-Term Reversal", "Value",
@@ -65,9 +82,9 @@ settings = {
     "seed_no": 1,
     "months": False,
     "split": {
-        "train_end": datetime(2015, 12, 31),
-        "test_end": datetime(2023, 11, 30),   #ændret fra (2020, 12, 31)
-        "val_years": 2,  # ændret fra 3
+        "train_end": datetime(2000, 12, 31),
+        "test_end": datetime(2022, 11, 30),   #ændret fra (2020, 12, 31)
+        "val_years": 10,  # ændret fra 3
         "model_update_freq": "yearly",
         "train_lookback": 100,  # forsøgt ændret
         "retrain_lookback": 100 # forsøgt ændret
@@ -78,8 +95,8 @@ settings = {
     "addition_n": 12,
     "deletion_n": 12,
     "screens": {
-        "start": datetime(2010, 12, 31),
-        "end": datetime(2023, 11, 30), #ændret fra (2020, 12, 31)
+        "start": datetime(1982, 12, 31),
+        "end": datetime(2022, 12, 31), #ændret fra (2020, 12, 31)
         "feat_pct": 0.5,
         "nyse_stocks": True
     },
@@ -91,8 +108,8 @@ settings = {
     },
     "pf": {
         "dates": {
-            "start_year": 2010,
-            "end_yr": 2023, #ændret fra 2023
+            "start_year": 2001,
+            "end_yr": 2022, #ændret fra 2023
             "split_years": 10
         },
         "hps": {
@@ -123,7 +140,7 @@ settings = {
     },
     "cov_set": {
         "industries": True,
-        "obs": 252 * 5,
+        "obs": 252 * 10,
         "hl_cor": 252 * 3 / 2,
         "hl_var": 252 / 2,
         "hl_stock_var": 252 / 2,
