@@ -694,11 +694,11 @@ def run_sanity_checks(run_checks, calc_dates, cluster_data_m, spec_risk_m, barra
 
 def main():
     # Indhenter chars og daily:
-    file_path_usa_test = "./data_test/usa_test.parquet"
-    daily_file_path = "./data_test/usa_dsf_test.parquet"
-    file_path_world_ret = "./data_test/world_ret_test.csv"
-    risk_free_path = "./data_test/risk_free_test.csv"
-    market_path = "./data_test/market_returns_test.csv"
+    file_path_usa_test = "./data_fifty/usa_test.parquet"
+    daily_file_path = "./data_fifty/usa_dsf_test.parquet"
+    file_path_world_ret = "./data_fifty/world_ret_test.csv"
+    risk_free_path = "./data_fifty/risk_free_test.csv"
+    market_path = "./data_fifty/market_returns_test.csv"
 
     file_path_cluster_labels = "Data/Cluster Labels.csv"
     file_path_factor_details = "Data/Factor Details.xlsx"
