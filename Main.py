@@ -83,7 +83,7 @@ settings = {
     "months": False,
     "split": {
         "train_end": datetime(2000, 12, 31),
-        "test_end": datetime(2022, 11, 30),   #ændret fra (2020, 12, 31)
+        "test_end": datetime(2022, 12, 31),   #ændret fra (2020, 12, 31)
         "val_years": 10,  # ændret fra 3
         "model_update_freq": "yearly",
         "train_lookback": 100,  # forsøgt ændret
