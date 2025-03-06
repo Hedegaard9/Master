@@ -433,13 +433,6 @@ def process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, r
 
     # Kontrollér nødvendige kolonner
     required_cols = ["dolvol_126d", "rvol_252d"]
-    for col in required_cols:
-        if col not in chars.columns:
-            raise KeyError(f"Kolonnen '{col}' mangler i DataFrame.")
-        if chars[col].isnull().any():
-            raise ValueError(f"Kolonnen '{col}' indeholder manglende værdier.")
-    if (chars["dolvol_126d"] == 0).any():
-        raise ValueError("Kolonnen 'dolvol_126d' indeholder værdier lig 0, hvilket vil føre til divisionsfejl.")
 
     # Beregn afledte kolonner
     pi = settings["pi"]
