@@ -146,10 +146,10 @@ def create_date_ranges(settings, first_cov_date, start_oos, hp_years):
     }
 
 def main(barra_cov):
-    get_from_path_model = "./data_test/"
-    output_path_usa = "./data_test/usa_test.parquet"
+    get_from_path_model = "./data_fifty/"
+    output_path_usa = "./data_fifty/usa_test.parquet"
     start_date = "2010-01-31"
-    rente_path = "Data/ff3_m.csv"
+    rente_path = "data_fifty/ff3_m.csv"
     daily_file_path = "./data_test/usa_dsf_test.parquet"
     file_path_world_ret = "./data_test/world_ret_test.csv"
     file_path_usa_test = "./data_test/usa_test.parquet"
