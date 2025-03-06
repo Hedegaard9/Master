@@ -76,3 +76,5 @@ static = portfolio_choice_functions.static_implement(
     cov_type=settings['pf']['hps']['cov_type'],
     validation=None
 )
+
+print(static)

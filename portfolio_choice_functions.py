@@ -591,7 +591,7 @@ def pfml_search_coef(pfml_input, p_vec, l_vec, hp_years, orig_feat):  # virker k
     return coef_list
 
 
-
+# Feature names
 def pfml_feat_fun(p, orig_feat, features=None):
     """
     Returnerer en liste af feature-navne.
