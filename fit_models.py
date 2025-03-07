@@ -11,26 +11,26 @@ import return_prediction_functions
 from pandas.tseries.offsets import MonthEnd
 # exec(open("Prepare_Data.py").read()) # udkommenteret, da jeg ikke lige ved, om den bliver brugt.
 # exec(open("data_run_files.py").read()) # mulighed for denne løsning
-file_path_usa_dsf = "./Data/usa_dsf.parquet"
-file_path_usa = "./Data/usa_rvol.parquet"
-file_path_id_test = "./data_test/top_5_percent_ids.csv"
-file_path_market_returns = "./Data/market_returns.csv"
-output_path_usa_dsf = "./data_test/usa_dsf_test.parquet"
-output_path_usa = "./data_test/usa_test.parquet"
-output_path_market_returns = "data_test/market_returns_test.csv"
-file_path_world_ret = "./Data/world_ret_monthly.csv"
-start_date = "2010-01-31"
-end_date = "2023-11-30"
+file_path_usa_dsf = "./data_fifty/usa_dsf.parquet"
+file_path_usa = "./data_fifty/usa_rvol.parquet"
+file_path_id_test = "./data_fifty/top_5_percent_ids.csv"
+file_path_market_returns = "./data_fifty/market_returns_test.csv"
+output_path_usa_dsf = "./data_fifty/usa_dsf_test.parquet"
+output_path_usa = "./data_fifty/usa_test.parquet"
+output_path_market_returns = "data_fifty/market_returns_test.csv"
+file_path_world_ret = "./data_fifty/world_ret_test.csv"
+start_date = pd.to_datetime('1952-12-31')
+end_date = pd.to_datetime('2020-12-31')
 
-output_path = "./data_test/"
+output_path = "./data_fifty/"
 
-file_path_usa_test = "./data_test/usa_test.parquet"
-daily_file_path = "./data_test/usa_dsf_test.parquet"
-file_path_world_ret = "./data_test/world_ret_test.csv"
-risk_free_path = "./data_test/risk_free_test.csv"
-market_path = "./data_test/market_returns_test.csv"
+file_path_usa_test = "./data_fifty/usa_test.parquet"
+daily_file_path = "./data_fifty/usa_dsf_test.parquet"
+file_path_world_ret = "./data_fifty/world_ret_test.csv"
+risk_free_path = "./data_fifty/risk_free_test.csv"
+market_path = "./data_fifty/market_returns_test.csv"
 
-rente_path = "Data/ff3_m.csv"
+rente_path = "data_fifty/ff3_m.csv"
 
 
 # Kører funktioner fra data_run_files
@@ -64,6 +64,8 @@ search_grid_single = pd.DataFrame({
 
 
 search_grid = search_grid_single
+
+
 
 start_time = time.time()
 models = []  # Liste til at gemme output for hver horizon
