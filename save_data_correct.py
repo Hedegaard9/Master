@@ -15,6 +15,8 @@ import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 import General_Functions
+import Estimate_Covariance_Matrix
+
 
 file_path_usa_dsf = "./data_fifty/usa_dsf.parquet"
 file_path_usa = "./data_fifty/usa_rvol.parquet"
@@ -93,6 +95,11 @@ output_data_ret_ld1_csv = "./data_fifty/data_ret_ld1.csv"
 data_ret, data_ret_ld1 = create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data_ret_csv, output_data_ret_ld1_csv)
 
 
+data_ret = pd.read_csv(output_data_ret_csv)
+data_ret_ld1 = pd.read_csv(output_data_ret_ld1_csv)
+data_ret['eom'] = pd.to_datetime(data_ret['eom'])
+data_ret_ld1['eom'] = pd.to_datetime(data_ret_ld1['eom'])
+data_ret_ld1['eom_ret'] = pd.to_datetime(data_ret_ld1['eom_ret'])
 ## Skab data_ret_ld1
 
 
@@ -646,12 +653,156 @@ daily = daily[(daily['ret_exc'].notna()) &
 daily['eom'] = daily['date'] + MonthEnd(0)
 daily.to_csv("./data_fifty/daily.csv", index=False)
 
+
+daily_path = "./data_fifty/daily.csv"
+chars_path = "./data_fifty/chars_behandlet.parquet"
+daily = pd.read_csv(daily_path, parse_dates=["date", "eom"])
+chars = pd.read_parquet(chars_path, engine='pyarrow')
+
+risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
+market_path = "./data_fifty/market_returns_test.csv"
+wealth_end = pf_set["wealth"]
+end = settings["split"]["test_end"]
+market_test = Prepare_Data.load_and_filter_market_returns_test(market_path)
+wealth = Prepare_Data.wealth_func(wealth_end, end, market_test, risk_free)
+wealth.to_csv("./data_fifty/wealth.csv", index=False)
+wealth['eom'] = pd.to_datetime(data_ret_ld1['eom'])
+
+
+search_grid_single = pd.DataFrame({
+    'name': ['m1'],
+    'horizon': [1]
+})
+search_grid = search_grid_single
+
+start_time = time.time()
+models = []  # Liste til at gemme output for hver horizon
+
+# Iterer over rækkerne i search_grid
+for i in range(len(search_grid)):
+    # Forbered y-variablen:
+    h = search_grid.iloc[i]["horizon"]  # fx 1
+
+    col_name = "ret_ld" + str(h)
+    pred_y_values = data_ret[col_name]
+
+    pred_y_df = data_ret[['id', 'eom']].copy()
+
+    pred_y_df['eom_pred_last'] = pred_y_df['eom'] + MonthEnd(1)
+    pred_y_df['ret_pred'] = pred_y_values
+
+    valid_chars = chars[chars['valid'] == True]
+    data_pred = pd.merge(pred_y_df, valid_chars, on=['id', 'eom'], how='inner')
+
+    update_freq = settings['split']['model_update_freq']
+    if update_freq == "once":
+        val_ends = [settings['split']['train_end']]
+        test_inc = 1000
+    elif update_freq == "yearly":
+        # Opret en liste af datoer med årligt interval
+        val_ends = pd.date_range(start=settings['split']['train_end'],
+                                 end=settings['split']['test_end'],
+                                 freq='YE').to_pydatetime().tolist()
+        test_inc = 1
+    elif update_freq == "decade":
+        start_date = pd.to_datetime(settings['split']['train_end'])
+        end_date = pd.to_datetime(settings['split']['test_end'])
+        val_ends = []
+        current = start_date
+        while current <= end_date:
+            val_ends.append(current)
+            current += pd.DateOffset(years=10)
+        test_inc = 10
+    else:
+        raise ValueError("Ugyldig model_update_freq i settings.")
+
+    op = {}  # Dictionary til at gemme modeloutput for hver val_end
+    inner_start = time.time()
+    # Iterer over hver validerings-slutdato
+    for val_end in val_ends:
+        print(val_end)
+        train_test_val = return_prediction_functions.data_split(
+            data_pred,
+            type=update_freq,
+            val_end=val_end,
+            val_years=settings['split']['val_years'],
+            train_start=settings['screens']['start'],
+            train_lookback=settings['split']['train_lookback'],
+            retrain_lookback=settings['split']['retrain_lookback'],
+            test_inc=test_inc,
+            test_end=settings['split']['test_end']
+        )
+        print("datasættet er tomt; hvis ja, stop loopet")
+        if train_test_val["test"].empty:
+            print("Test datasættet er tomt for valideringsperiode:", val_end, ". Stopper forudsigelser.")
+            break
+        model_start = time.time()
+        model_op = return_prediction_functions.rff_hp_search(
+            train_test_val,
+            feat=features,
+            p_vec=settings['rff']['p_vec'],
+            g_vec=settings['rff']['g_vec'],
+            l_vec=settings['rff']['l_vec'],
+            seed=settings['seed_no']
+        )
+        model_time = time.time() - model_start
+        print("Model training time:", model_time, "seconds")
+        op[val_end] = model_op
+    inner_time = time.time() - inner_start
+    print("Total time for current horizon:", inner_time, "seconds")
+
+    # Gem model-output for den aktuelle horizon til en pickle-fil (svarer til R's saveRDS)
+    model_filename = f"{output_path}/model_{h}.pkl"
+    with open(model_filename, "wb") as f:
+        pickle.dump(op, f)
+
+    models.append(op)
+
+total_time = time.time() - start_time
+print("Total run time:", total_time, "seconds")
+
+
+
+
+
+
+
+file_path_cluster_labels = "Data/Cluster Labels.csv"
+file_path_factor_details = "Data/Factor Details.xlsx"
+
+
+# Hvis du ikke har brug for den fjerde returnerede værdi, kan du bruge en underscore
+cluster_data_d, ind_factors, clusters, cluster_data_m  = Estimate_Covariance_Matrix.process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
+
+fct_ret_est = Estimate_Covariance_Matrix.run_regressions_by_date(cluster_data_d, ind_factors, clusters)
+fct_ret = Estimate_Covariance_Matrix.create_factor_returns(fct_ret_est)
+
+w_cor = (0.5 * (1 / settings['cov_set']['hl_cor'])) * np.arange(settings['cov_set']['obs'], 0, -1)
+w_var = (0.5 * (1 / settings['cov_set']['hl_var'])) * np.arange(settings['cov_set']['obs'], 0, -1)
+
+fct_dates = np.sort(fct_ret["date"].unique())
+min_calc_date = fct_dates[settings["cov_set"]["obs"] - 1] - pd.DateOffset(months=1)
+calc_dates = np.sort(cluster_data_m.loc[cluster_data_m["eom"] >= min_calc_date, "eom"].unique())
+
+factor_cov_est = Estimate_Covariance_Matrix.factor_cov_estimate(calc_dates, fct_dates, fct_ret, w_cor, w_var, settings)
+
+spec_risk = Estimate_Covariance_Matrix.unnest_spec_risk(fct_ret_est)
+spec_risk_res_vol = Estimate_Covariance_Matrix.calculate_ewma(spec_risk, settings)
+
+spec_risk_m, spec_risk_res_vol = Estimate_Covariance_Matrix.process_spec_risk_m(fct_dates, spec_risk_res_vol)
+barra_cov = Estimate_Covariance_Matrix.calculate_barra_cov(calc_dates, cluster_data_m, spec_risk_m, factor_cov_est)
+
+with open('./data_fifty/barra_cov.pkl', 'wb') as f:
+    pickle.dump(barra_cov, f)
+
 #Done print
 print("færdig med data_ret, data_ret_ld1")
 print("chars er gemt")
 print("daily er gemt")
-
-
+print("wealth er gemt")
+print("Predictions er gemt i sin pickle fil")
+print("barra_cov er gemt")
+print("Færdig")
 # Eksempel:
 #data_ret = pd.read_csv(output_data_ret_csv)
 #data_ret_ld1 = pd.read_csv(output_data_ret_ld1_csv)
