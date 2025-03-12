@@ -14,6 +14,7 @@ from sklearn.linear_model import Ridge
 import re
 import matplotlib.pyplot as plt
 import seaborn as sns
+import General_Functions
 
 file_path_usa_dsf = "./data_fifty/usa_dsf.parquet"
 file_path_usa = "./data_fifty/usa_rvol.parquet"
@@ -44,77 +45,58 @@ risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
 h_list = [1]  # Horisonter
 wealth = Prepare_Data.wealth_func(wealth_end, end, market_test, risk_free)
 
-def long_horizon_ret(data, h, impute):
-    # Udvælg unikke datoer for observationer med ikke-missing ret_exc
-    # Vi beholder kun én kolonne, og kalder den 'merge_date'
-    dates = data.loc[data['ret_exc'].notna(), ['eom']].drop_duplicates().rename(columns={'eom': 'merge_date'})
 
-    # Beregn start- og slutdato for hver id (kun for de observationer, hvor ret_exc ikke er missing)
-    ids = data.loc[data['ret_exc'].notna()].groupby('id').agg(start=('eom', 'min'),
-                                                              end=('eom', 'max')).reset_index()
+def create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data_ret_csv, output_data_ret_ld1_csv):
+    # Læs og filtrer data
+    df_test = pd.read_csv(file_path_world_ret)
+    kolonner = ["excntry", "id", "eom", "ret_exc"]
+    monthly = df_test[kolonner]
+    monthly = monthly[(monthly["excntry"] == "USA") & (monthly["id"] <= 99999)]
+    monthly["eom"] = pd.to_datetime(monthly["eom"])
 
-    # Udfør en cross join mellem ids og dates
-    full_ret = ids.merge(dates, how='cross')
+    # Beregn long horizon returns (antager, at funktionen long_horizon_ret er defineret)
+    data_ret = General_Functions.long_horizon_ret(data=monthly,
+                                                  h=settings['pf']['hps']['m1']['K'],
+                                                  impute="zero")
 
-    # Filtrer, så kun de rækker bevares, hvor merge_date ligger mellem start og end
-    full_ret = full_ret[(full_ret['merge_date'] >= full_ret['start']) & (full_ret['merge_date'] <= full_ret['end'])]
+    # Opret data_ret_ld1 med de relevante kolonner og beregn eom_ret
+    data_ret_ld1 = data_ret[['id', 'eom', 'ret_ld1']].copy()
+    data_ret_ld1['eom_ret'] = data_ret_ld1['eom'] + MonthEnd(1)
 
-    # Drop start- og end-kolonnerne, og omdøb merge_date til eom
-    full_ret = full_ret.drop(columns=['start', 'end']).rename(columns={'merge_date': 'eom'})
+    # Merge med risk_free og beregn total return tr_ld1
+    data_ret_ld1 = data_ret_ld1.merge(risk_free, on='eom', how='left')
+    data_ret_ld1['tr_ld1'] = data_ret_ld1['ret_ld1'] + data_ret_ld1['rf']
 
-    # Merge med de originale data for at få ret_exc
-    full_ret = full_ret.merge(data[['id', 'eom', 'ret_exc']], on=['id', 'eom'], how='left')
+    # Fjern kolonnen 'rf'
+    data_ret_ld1 = data_ret_ld1.drop(columns=['rf'])
 
-    # Sortér efter id og eom
-    full_ret = full_ret.sort_values(['id', 'eom']).reset_index(drop=True)
+    # Opret et shiftet DataFrame for at få tr_ld0 (total return fra næste periode)
+    shifted = data_ret_ld1[['id', 'eom', 'tr_ld1']].copy()
+    shifted['eom'] = shifted['eom'] + MonthEnd(1)
+    shifted = shifted.rename(columns={'tr_ld1': 'tr_ld0'})
 
-    # Opret kolonner for long horizon returns: ret_ld1, ret_ld2, ..., ret_ld{h}
-    for l in range(1, h + 1):
-        full_ret[f'ret_ld{l}'] = full_ret.groupby('id')['ret_exc'].shift(-l)
+    # Merge det shiftede DataFrame med data_ret_ld1 på 'id' og 'eom'
+    data_ret_ld1 = data_ret_ld1.merge(shifted[['id', 'eom', 'tr_ld0']], on=['id', 'eom'], how='left')
 
-    # Fjern den oprindelige ret_exc-kolonne
-    full_ret.drop(columns=['ret_exc'], inplace=True)
+    # Fjern den midlertidige variable 'monthly'
+    del monthly
+    data_ret.to_csv(output_data_ret_csv, index=False)
+    data_ret_ld1.to_csv(output_data_ret_ld1_csv, index=False)
 
-    # Fjern rækker, hvor alle ret_ld-kolonner er missing
-    lag_cols = [f'ret_ld{l}' for l in range(1, h + 1)]
-    all_missing = full_ret[lag_cols].isna().all(axis=1)
-    print(f"All missing excludes {all_missing.mean() * 100:.2f}% of the observations")
-    full_ret = full_ret[~all_missing].reset_index(drop=True)
+    return data_ret, data_ret_ld1
 
-    # Imputering af manglende værdier
-    if impute == "zero":
-        full_ret[lag_cols] = full_ret[lag_cols].fillna(0)
-    elif impute == "mean":
-        # Imputer pr. eom
-        full_ret[lag_cols] = full_ret.groupby('eom')[lag_cols].transform(lambda x: x.fillna(x.mean()))
-    elif impute == "median":
-        full_ret[lag_cols] = full_ret.groupby('eom')[lag_cols].transform(lambda x: x.fillna(x.median()))
 
-    return full_ret
+# Eksempel på brug:
+# risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
+output_data_ret_csv = "./data_fifty/data_ret.csv"
+output_data_ret_ld1_csv = "./data_fifty/data_ret_ld1.csv"
+data_ret, data_ret_ld1 = create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data_ret_csv, output_data_ret_ld1_csv)
 
 
 ## Skab data_ret_ld1
 
 
-world_ret = pd.read_csv(file_path_world_ret, usecols=["excntry", "id", "eom", "ret_exc"], dtype={"eom": str})
-filtered_world_ret = world_ret[(world_ret["excntry"] == "USA") & (world_ret["id"] <= 99999)].copy()
-filtered_world_ret["eom"] = pd.to_datetime(filtered_world_ret["eom"])
-monthly = filtered_world_ret
-data_ret = long_horizon_ret(filtered_world_ret, h=12, impute="zero")
-data_ret_ld1 = data_ret.copy()
-data_ret_ld1['eom_ret'] = (data_ret_ld1['eom'] + pd.DateOffset(months=1)) + MonthEnd(0)
-data_ret_ld1 = data_ret_ld1[['id', 'eom', 'eom_ret', 'ret_ld1']]
-data_ret_ld1 = data_ret_ld1.merge(risk_free, on='eom', how='left')
-data_ret_ld1['tr_ld1'] = data_ret_ld1['ret_ld1'] + data_ret_ld1['rf']
-data_ret_ld1.drop(columns=['rf'], inplace=True)
-temp = data_ret_ld1[['id', 'eom', 'tr_ld1']].copy()
 
-temp['eom'] = temp['eom'] + pd.offsets.MonthEnd(1)
-
-temp = temp.rename(columns={'tr_ld1': 'tr_ld0'})
-
-data_ret_ld1 = data_ret_ld1.merge(temp, on=['id', 'eom'], how='left')
-data_ret_ld1
 
 chars = pd.read_parquet(output_path_usa)
 
@@ -635,7 +617,6 @@ chars = size_screen_fun(chars, type_screen)
 chars = addition_deletion_fun(chars, addition_n=settings['addition_n'], deletion_n=settings['deletion_n'], pf_set=settings)
 
 
-
 # Plot investable universe - udkommenteret
 valid_counts = chars.loc[chars['valid'] == True].groupby('eom').size().reset_index(name='N')
 #plt.figure(figsize=(10,6))
@@ -666,5 +647,14 @@ daily['eom'] = daily['date'] + MonthEnd(0)
 daily.to_csv("./data_fifty/daily.csv", index=False)
 
 #Done print
+print("færdig med data_ret, data_ret_ld1")
 print("chars er gemt")
 print("daily er gemt")
+
+
+# Eksempel:
+#data_ret = pd.read_csv(output_data_ret_csv)
+#data_ret_ld1 = pd.read_csv(output_data_ret_ld1_csv)
+#data_ret['eom'] = pd.to_datetime(data_ret['eom'])
+#data_ret_ld1['eom'] = pd.to_datetime(data_ret_ld1['eom'])
+#data_ret_ld1['eom_ret'] = pd.to_datetime(data_ret_ld1['eom_ret'])
