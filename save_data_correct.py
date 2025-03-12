@@ -646,11 +646,21 @@ daily = daily[(daily['ret_exc'].notna()) &
 daily['eom'] = daily['date'] + MonthEnd(0)
 daily.to_csv("./data_fifty/daily.csv", index=False)
 
+
+risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
+market_path = "./data_fifty/market_returns_test.csv"
+wealth_end = pf_set["wealth"]
+end = settings["split"]["test_end"]
+market_test = Prepare_Data.load_and_filter_market_returns_test(market_path)
+wealth = Prepare_Data.wealth_func(wealth_end, end, market_test, risk_free)
+wealth.to_csv("./data_fifty/wealth.csv", index=False)
+
+
 #Done print
 print("færdig med data_ret, data_ret_ld1")
 print("chars er gemt")
 print("daily er gemt")
-
+print("wealth er gemt")
 
 # Eksempel:
 #data_ret = pd.read_csv(output_data_ret_csv)
