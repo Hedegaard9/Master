@@ -53,26 +53,57 @@ def expected_risk_fun(ws, dates, cov_list):
 
 # Long horizon returns
 def long_horizon_ret(data, h, impute):
+    # Udtræk unikke datoer og opret 'merge_date' (samme som 'eom')
     dates = data.loc[data['ret_exc'].notna(), ['eom']].drop_duplicates().assign(merge_date=lambda x: x['eom'])
-    ids = data.loc[data['ret_exc'].notna()].groupby('id').agg(start=('eom', 'min'), end=('eom', 'max')).reset_index()
-    full_ret = ids.merge(dates, how='cross')
+    # Fjern den oprindelige 'eom'-kolonne – behold kun 'merge_date'
+    dates['key'] = 1
+    dates = dates[['merge_date', 'key']]
+
+    # Beregn for hver id den tidligste (start) og seneste (end) dato med ikke-NA ret_exc
+    ids = data.loc[data['ret_exc'].notna()].groupby('id').agg(start=('eom', 'min'),
+                                                              end=('eom', 'max')).reset_index()
+    ids['key'] = 1
+
+    # Alternativ krydsjoin via nøglekolonne
+    full_ret = ids.merge(dates, on='key').drop('key', axis=1)
+
+    # Filtrer, så kun rækker hvor merge_date ligger mellem start og end medtages
+    full_ret = full_ret[(full_ret['merge_date'] >= full_ret['start']) &
+                        (full_ret['merge_date'] <= full_ret['end'])]
+
+    # Omdøb merge_date til eom, så vi matcher den oprindelige datanøgle
+    full_ret = full_ret.rename(columns={'merge_date': 'eom'})
+
+    # Merge med original data for at få ret_exc for hver id og eom
     full_ret = full_ret.merge(data[['id', 'eom', 'ret_exc']], on=['id', 'eom'], how='left')
+
+    # Sorter data
     full_ret = full_ret.sort_values(['id', 'eom'])
+
+    # Opret lead-kolonner: ret_ld1, ret_ld2, ... ret_ldh
     for l in range(1, h + 1):
         full_ret[f'ret_ld{l}'] = full_ret.groupby('id')['ret_exc'].shift(-l)
+
+    # Fjern den originale ret_exc kolonne
     full_ret.drop(columns=['ret_exc'], inplace=True)
 
-    # Fjern rækker, hvor alle ret_ld værdier er NaN
-    all_missing = full_ret.iloc[:, -h:].isna().all(axis=1)
+    # Fjern rækker, hvor alle ret_ld-kolonner er NaN
+    lead_cols = [f'ret_ld{l}' for l in range(1, h + 1)]
+    all_missing = full_ret[lead_cols].isna().all(axis=1)
     print(f"All missing excludes {all_missing.mean() * 100:.2f}% of the observations")
     full_ret = full_ret[~all_missing].reset_index(drop=True)
 
+    # Imputér manglende værdier kun i lead-kolonnerne
     if impute == "zero":
-        full_ret.update(full_ret.iloc[:, -h:].fillna(0))
+        full_ret[lead_cols] = full_ret[lead_cols].fillna(0)
     elif impute == "mean":
-        full_ret.update(full_ret.groupby('eom').transform(lambda x: x.fillna(x.mean())))
+        full_ret[lead_cols] = full_ret.groupby('eom')[lead_cols].transform(lambda x: x.fillna(x.mean()))
     elif impute == "median":
-        full_ret.update(full_ret.groupby('eom').transform(lambda x: x.fillna(x.median())))
+        full_ret[lead_cols] = full_ret.groupby('eom')[lead_cols].transform(lambda x: x.fillna(x.median()))
+
+    # Fjern hjælpekolonnerne kolonnerne "start" og "end"
+    full_ret = full_ret.drop(columns=['start', 'end'])
+
     return full_ret
 
 # Portfolio Function
