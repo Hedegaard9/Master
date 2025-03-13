@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import gc
 import xgboost
+from pandas.tseries.offsets import MonthEnd
 
 # Read configuration file
 def read_config(file):
@@ -206,7 +207,8 @@ def pf_ts_fun(weights, data, wealth, gam):
 
     # Udregn eom_ret som eom plus 1 måned (forudsætter at eom er en datetime)
     pf['eom'] = pd.to_datetime(pf['eom'])
-    pf['eom_ret'] = pf['eom'] + pd.DateOffset(months=1)
+    #pf['eom_ret'] = pf['eom'] + pd.DateOffset(months=1)
+    pf['eom_ret'] = pf['eom'] + MonthEnd(1)
 
     # Fjern den oprindelige eom-kolonne, hvis ønsket
     pf = pf.drop(columns=['eom'])
