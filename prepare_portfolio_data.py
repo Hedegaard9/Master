@@ -36,7 +36,7 @@ def add_return_predictions(chars, settings, get_from_path_model):
         data_ret = data_run_files.monthly_returns(risk_free, h_list, output_path_usa)
         chars, daily = Prepare_Data.process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, risk_free_path, market_path)
     """
-    for h in range(1, settings['pf']['hps']['m1']['K'] + 1):
+    for h in range(1, 2): #Hardcoded 2 ind for vi har kun 1 horizon
         file_path = os.path.join(get_from_path_model, f"model_{h}.pkl")
         with open(file_path, 'rb') as f:
             model_dict = pickle.load(f)  # Indlæs pickle-fil
