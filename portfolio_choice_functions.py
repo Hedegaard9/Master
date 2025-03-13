@@ -319,7 +319,7 @@ def rw_implement(data, wealth, dates, pf_set):
     for d in dates:
         data_sub = data_split[d]
         er_rank = data_sub["pred_ld1"].rank()
-        pos = (er_rank - er_rank.mean()) * 2 / er_rank.abs().sum()
+        pos = (er_rank - er_rank.mean()) * 2 / (er_rank - er_rank.mean()).abs().sum() #So it sums to 2
         data_sub["w"] = pos
         rw_opt.append(data_sub[["id", "eom", "w"]])
 
