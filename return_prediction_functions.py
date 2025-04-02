@@ -325,6 +325,7 @@ def ridge_hp_search(data, feat, vol_scale, lambdas):
     }
 
 
+
 def fit_xgb(train, val, params, iter, es, cores, seed):
     """
     Træner en XGBoost-model med de angivne parametre.

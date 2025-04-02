@@ -16,6 +16,7 @@ def m_func(w, mu, rf, sigma_gam, gam, lambda_mat, iter): ## ændret denne i port
     lambda_mat = np.array(lambda_mat)
 
     n = lambda_mat.shape[0]
+#    print("m_func: n =", n)
 
     g_bar = np.ones(n)
     mu_bar_vec = np.ones(n) * (1 + rf + mu)
