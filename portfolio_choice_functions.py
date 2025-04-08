@@ -199,6 +199,64 @@ def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, c
     result["pf"]["cluster"] = cf_cluster
     return result["pf"]
 
+
+def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, cov_list, dates, seed):
+    np.random.seed(seed)
+
+    if cf_cluster != "bm":
+        # Fjern kolonner, der starter med "pred_ld"
+        cf = data.loc[:, ~data.columns.str.startswith("pred_ld")].copy()
+        # Tilføj "id_shuffle" kolonne: for hver gruppe defineret af 'eom' laves en tilfældig permutation af 'id'
+        cf['id_shuffle'] = cf.groupby('eom')['id'].transform(lambda x: np.random.permutation(x.values))
+
+        # Hent de relevante karakteristika for den givne klynge fra cluster_labels
+        chars_sub = cluster_labels.loc[
+            (cluster_labels['cluster'] == cf_cluster) & (cluster_labels['characteristic'].isin(features)),
+            'characteristic'
+        ].tolist()
+
+        # Filtrer for kun at bruge de kolonner, der findes i cf
+        available_chars = [col for col in chars_sub if col in cf.columns]
+
+        # Lav en DataFrame med de originale feature-værdier, men med 'id' omdøbt til 'id_shuffle'
+        chars_data = cf[['id', 'eom'] + available_chars].copy().rename(columns={'id': 'id_shuffle'})
+        # Fjern de oprindelige feature-kolonner fra cf
+        cf = cf.drop(columns=available_chars)
+        # Merge cf med chars_data på ['id_shuffle', 'eom']
+        cf = pd.merge(cf, chars_data, on=['id_shuffle', 'eom'], how='left')
+
+        # Forventede afkast: for hver model i er_models
+        for m_sub in er_models.values():
+            # Debug-print
+            try:
+                pred = m_sub['pred']
+            except Exception as e:
+                pred = None
+            try:
+                sub_dates = np.unique(pred['eom'])
+            except Exception as e:
+                sub_dates = np.array([pred])
+
+            # Vælg rækker fra cf, hvor 'eom' er i sub_dates, og udtræk kolonnerne angivet i features
+            cf_x = cf.loc[cf['eom'].isin(sub_dates), features].to_numpy()
+            # Anvend rff-transformation med modelens W og passér p
+            rff_x = rff(cf_x, p=m_sub['opt_hps']['p'], W=m_sub['W'])
+            # Kombiner cosine- og sine-komponenter og gang med m_sub['opt_hps']['p']^(-0.5)
+            cf_new_x = (m_sub['opt_hps']['p'] ** (-0.5)) * np.hstack([rff_x['X_cos'], rff_x['X_sin']])
+            # Kalder predict() uden 'newx' og 's' keywords (sklearn Ridge forventer blot X)
+            pred_values = m_sub['fit'].predict(cf_new_x)
+            pred_values = np.ravel(pred_values)
+            cf.loc[cf['eom'].isin(sub_dates), 'pred_ld1'] = pred_values
+    else:
+        cf = data[data['valid'] == True].copy()
+
+    # Implementér TPF på de kontrafaktuelle data.
+    op = tpf_implement(cf, cov_list=cov_list, wealth=wealth, dates=dates, gam=gamma_rel)
+    op_pf = op['pf'].copy()
+    op_pf['cluster'] = cf_cluster
+    return op_pf
+
+
 # Mean-Variance Efficient Portfolios of Risky Assets
 def mv_risky_fun(data, cov_list, wealth, dates, gam, u_vec):
     # Filter relevant data
@@ -849,6 +907,148 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
     return {"reals": reals_dict, "signal_t": signal_t_dict, "rff_w": rff_w if rff_feat else None}
 
 
+def pfml_cf_fun(data, cf_cluster, pfml_base, dates, cov_list, scale, orig_feat, gamma_rel, wealth, risk_free, mu, iter,
+                seed):
+    """
+    Portfolio-ML med kontrafaktuelle inputs.
 
+    Parametre:
+        data = chars
+        cf_cluster (str): Den kontrafaktuelle klynge. Hvis denne ikke er "bm", omarrangeres id'erne.
+        pfml_base (dict): Pfml-base, fx indeholder hyperparametre og aim-koefficienter.
+        dates = dates (f.eks. out-of-sample datoer)
+        cov_list (dict): f.eks. barra
+        scale (bool): Skalering med volatilitet.
+        orig_feat (list): Oprindelige feature-navne.
+        gamma_rel (float): Parameter for risikojustering.
+        wealth (float): Formueparameter.
+        risk_free (float): Risikofri rente.
+        mu (float): Forventet afkast.
+        iter (int): Antal iterationer til optimering.
+        seed (int): Seed til randomisering.
+
+    Eksempel:
+    pf_cf = pfml_cf_fun(data=chars, cf_cluster="bm", pfml_base=pfml, dates= dates_oos, cov_list=barra_cov,
+            scale = settings['pf_ml']['scale'], orig_feat = settings['pf_ml']['orig_feat'],
+            gamma_rel =10, wealth = wealth, risk_free=risk_free , mu = pf_set['mu'], iter =10, seed =10)
+    Returnerer:
+        pd.DataFrame med den kontrafaktuelle portefølje, inkl. 'w_aim', 'type' ("Portfolio-ML") og 'cluster'.
+    """
+    # --- Trin 1: Skalering af data (hvis scale er True) ---
+    if scale:
+        scales_list = []
+        for d in dates:
+            d_str = d.strftime('%Y-%m-%d')
+            sigma = General_Functions.create_cov(barra_cov[d_str])
+            if hasattr(sigma, 'values'):
+                sigma_vals = sigma.values
+                ids_sigma = sigma.index.astype(float)
+            else:
+                sigma_vals = sigma
+                ids_sigma = np.arange(sigma.shape[0])
+            diag_vol = np.sqrt(np.diag(sigma_vals))
+            df_scales = pd.DataFrame({
+                'id': ids_sigma,
+                'eom': d_str,
+                'vol_scale': diag_vol
+            })
+            scales_list.append(df_scales)
+        scales_df = pd.concat(scales_list, ignore_index=True)
+        # Konverter eom til datetime, hvis nødvendigt
+        scales_df['eom'] = pd.to_datetime(scales_df['eom'])
+        data = pd.merge(data, scales_df, on=['id', 'eom'], how='left')
+        data['vol_scale'] = data.groupby('eom')['vol_scale'].transform(lambda x: x.fillna(x.median()))
+
+    # --- Trin 2: Sæt seed for randomisering ---
+    np.random.seed(seed)
+
+    # --- Trin 3: Forbered kontrafaktuelle data ---
+    # Forventer at 'features' er en global liste med navne på feature-kolonner.
+    cf = data[['id', 'eom', 'vol_scale'] + features].copy()
+
+    # --- Trin 4: Hvis cf_cluster ikke er "bm", omarranger id'erne ---
+    if cf_cluster != "bm":
+        # For hver 'eom', lav en tilfældig permutation af 'id'
+        cf['id_shuffle'] = cf.groupby('eom')['id'].transform(lambda x: np.random.permutation(x.values))
+        # Vælg relevante karakteristika ud fra cluster_labels
+        chars_sub = cluster_labels.loc[
+            (cluster_labels['cluster'] == cf_cluster) & (cluster_labels['characteristic'].isin(features)),
+            'characteristic'
+        ].tolist()
+        # Lav en DataFrame med de originale feature-værdier, men med 'id' omdøbt til 'id_shuffle'
+        chars_data = cf[['id', 'eom'] + chars_sub].copy().rename(columns={'id': 'id_shuffle'})
+        # Fjern de oprindelige feature-kolonner fra cf
+        cf = cf.drop(columns=chars_sub)
+        # Merge, så de kontrafaktuelle rækker får feature-værdier fra en tilfældigt valgt (shuffled) række
+        cf = pd.merge(cf, chars_data, on=['id_shuffle', 'eom'], how='left')
+
+    # --- Trin 5: Beregn kontrafaktuel aim-portefølje for hver dato ---
+    aim_cf_list = []
+    for d in dates:
+        # Sørg for at arbejde med data for den aktuelle dato
+        d_date = pd.to_datetime(d)
+        cf_d = cf[cf['eom'] == d_date].copy()
+        d_str = str(d_date.date())
+        # Hent hyperparametre og aim-koefficienter for datoen
+        best_hps = pfml_base['best_hps_list'][d_str]
+        best_g = best_hps['g']
+        best_p = best_hps['p']
+        aim_coef = best_hps['coef']  # Forventet at være et 1D numpy-array
+        best_g_str = str(best_g)
+        rff_w = pfml_base['hps'][best_g_str]['rff_w'][:, :int(best_p / 2)]
+
+        # Hent feature-input for den aktuelle dato
+        X = cf_d[features]
+        # Anvend random Fourier transformation – her antages rff returnerer en dict med 'X_cos' og 'X_sin'
+        rff_x = rff(X, p=best_p, W=rff_w)
+        X_cos = rff_x['X_cos']
+        X_sin = rff_x['X_sin']
+        s = np.hstack([X_cos, X_sin])
+        n_features = int(best_p / 2)
+        col_names = [f"rff{i + 1}_cos" for i in range(n_features)] + [f"rff{i + 1}_sin" for i in range(n_features)]
+        # Brug X.index, da dette svarer til den subset, der faktisk blev transformeret
+        s_df = pd.DataFrame(s, columns=col_names, index=X.index)
+
+        # Demean hver kolonne
+        s_df = s_df - s_df.mean()
+        # Tilføj konstant-kolonne med værdien 1
+        s_df['constant'] = 1
+        # Skaler hver kolonne, så L2-normen bliver 1
+        s_df = s_df.apply(lambda x: x * (1 / np.sqrt(np.sum(x ** 2))) if np.sum(x ** 2) > 0 else x)
+
+        # Omdøb/omarranger kolonnerne ifølge pfml_feat_fun
+        feat_order = portfolio_choice_functions.pfml_feat_fun(p=best_p, orig_feat=orig_feat)
+        s_df = s_df[feat_order]
+
+        # Hvis scale er True, juster med inverse volatilitetsskalaer
+        if scale:
+            vol_scales = cf_d['vol_scale'].values
+            inv_vol = np.diag(1 / vol_scales)
+            s_scaled = inv_vol @ s_df.values
+            s_df = pd.DataFrame(s_scaled, columns=s_df.columns, index=s_df.index)
+
+        # Beregn aim-vægten: matrixproduktet af s og aim_coef
+        w_aim = s_df.values @ aim_coef
+        aim_cf_d = pd.DataFrame({
+            'id': cf_d['id'].values,
+            'eom': cf_d['eom'].values,
+            'w_aim': w_aim
+        })
+        aim_cf_list.append(aim_cf_d)
+    aim_cf = pd.concat(aim_cf_list, ignore_index=True)
+
+    # --- Trin 6: Beregn den kontrafaktuelle portefølje ---
+    data_subset = data[(data['eom'].isin(dates_oos)) & (data['valid'] == True)][
+        ['id', 'eom', 'eom_ret', 'me', 'tr_ld1', 'valid']].copy()
+    w_cf = pfml_w(data_subset, dates=dates, cov_list=cov_list, lambda_list=lambda_list, gamma_rel=gamma_rel,
+                  iter=iter, risk_free=risk_free, wealth=wealth, mu=mu, aims=aim_cf)
+
+    # --- Trin 7: Beregn porteføljens tidsserieudvikling ---
+    pf_cf = General_Functions.pf_ts_fun(w_cf, data=data, wealth=wealth, gam=gamma_rel)
+    pf_cf['type'] = "Portfolio-ML"
+
+    # --- Trin 8: Tilføj klyngeinformation og returner resultatet ---
+    pf_cf['cluster'] = cf_cluster
+    return pf_cf
 
 

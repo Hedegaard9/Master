@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import General_Functions
 import Estimate_Covariance_Matrix
+import datetime
 
 
 file_path_usa_dsf = "./data_fifty/usa_dsf.parquet"
@@ -669,6 +670,7 @@ wealth.to_csv("./data_fifty/wealth.csv", index=False)
 wealth['eom'] = pd.to_datetime(data_ret_ld1['eom'])
 
 
+
 search_grid_single = pd.DataFrame({
     'name': ['m1'],
     'horizon': [1]
@@ -687,12 +689,20 @@ for i in range(len(search_grid)):
     pred_y_values = data_ret[col_name]
 
     pred_y_df = data_ret[['id', 'eom']].copy()
-
     pred_y_df['eom_pred_last'] = pred_y_df['eom'] + MonthEnd(1)
     pred_y_df['ret_pred'] = pred_y_values
 
     valid_chars = chars[chars['valid'] == True]
     data_pred = pd.merge(pred_y_df, valid_chars, on=['id', 'eom'], how='inner')
+
+    # ----------------- NYT: De-mean afkastene -----------------
+    # Beregn månedligt gennemsnit af afkastene baseret på 'eom'
+    data_pred['mean_ret'] = data_pred.groupby('eom')['ret_pred'].transform('mean')
+    # Beregn de-meanede afkast ved at trække det månedlige gennemsnit fra
+    data_pred['ret_pred_demeaned'] = data_pred['ret_pred'] - data_pred['mean_ret']
+    # Sørg for, at modellen trænes på de-meanede værdier
+    data_pred['ret_pred'] = data_pred['ret_pred_demeaned']
+    # -----------------------------------------------------------
 
     update_freq = settings['split']['model_update_freq']
     if update_freq == "once":
@@ -716,11 +726,11 @@ for i in range(len(search_grid)):
     else:
         raise ValueError("Ugyldig model_update_freq i settings.")
 
-    op = {}  # Dictionary til at gemme modeloutput for hver val_end
+    op = {}  # Dictionary til at gemme modeloutput for hver validerings-slutdato
     inner_start = time.time()
     # Iterer over hver validerings-slutdato
     for val_end in val_ends:
-        print(val_end)
+      #  print(val_end)
         train_test_val = return_prediction_functions.data_split(
             data_pred,
             type=update_freq,
@@ -732,18 +742,19 @@ for i in range(len(search_grid)):
             test_inc=test_inc,
             test_end=settings['split']['test_end']
         )
-        print("datasættet er tomt; hvis ja, stop loopet")
+    #    print("datasættet er tomt; hvis ja, stop loopet")
         if train_test_val["test"].empty:
-            print("Test datasættet er tomt for valideringsperiode:", val_end, ". Stopper forudsigelser.")
+     #       print("Test datasættet er tomt for valideringsperiode:", val_end, ". Stopper forudsigelser.")
             break
         model_start = time.time()
+     #   print("det vi gætter efter", train_test_val["val"]["ret_pred"])
         model_op = return_prediction_functions.rff_hp_search(
             train_test_val,
             feat=features,
             p_vec=settings['rff']['p_vec'],
             g_vec=settings['rff']['g_vec'],
             l_vec=settings['rff']['l_vec'],
-            seed=settings['seed_no']
+            seed= 1 #settings['seed_no']
         )
         model_time = time.time() - model_start
         print("Model training time:", model_time, "seconds")
@@ -751,8 +762,30 @@ for i in range(len(search_grid)):
     inner_time = time.time() - inner_start
     print("Total time for current horizon:", inner_time, "seconds")
 
-    # Gem model-output for den aktuelle horizon til en pickle-fil (svarer til R's saveRDS)
-    model_filename = f"{output_path}/model_{h}.pkl"
+    # ----------------- NYT: Tilføj månedlige gennemsnit til forudsigelser -----------------
+    # Opret DataFrame med månedlige gennemsnit
+    monthly_means_df = (data_pred[['eom', 'mean_ret']]
+                         .drop_duplicates()
+                         .sort_values('eom')
+                         .reset_index(drop=True))
+    # For hver datetime-key i op skal vi merge monthly_means_df med 'pred'-DataFrame'en
+    for key in list(op.keys()):
+        if isinstance(key, datetime.datetime):
+            model_dict = op[key]
+            if 'pred' in model_dict:
+                pred_df = model_dict['pred']
+                # Merge på 'eom_pred_last' i pred_df og 'eom' i monthly_means_df
+                pred_df = pred_df.merge(monthly_means_df, left_on='eom_pred_last', right_on='eom', how='left')
+                pred_df = pred_df.drop(columns=['eom_x']).rename(columns={'eom_y': 'eom'}) # ny sørg for kun en eom
+                print("pred_df før tilføjelse af pred_df", pred_df)
+                # Re-add de-meanede afkast ved at lægge mean_ret til forudsigelsen
+                pred_df['pred'] = pred_df['pred'] + pred_df['mean_ret']
+                print("pred_df efter tilføjelse af pred_df", pred_df)
+                model_dict['pred'] = pred_df
+                op[key] = model_dict
+
+    # Gem model-output for den aktuelle horizon til en pickle-fil
+    model_filename = f"{output_path}/demeaned_model_{h}.pkl"
     with open(model_filename, "wb") as f:
         pickle.dump(op, f)
 
@@ -760,9 +793,6 @@ for i in range(len(search_grid)):
 
 total_time = time.time() - start_time
 print("Total run time:", total_time, "seconds")
-
-
-
 
 
 
