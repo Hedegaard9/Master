@@ -39,6 +39,7 @@ sns.set_palette(sns.color_palette(colours_theme))
 #    "Minimum Variance", "Factor-ML", "Rank-ML", "Markowitz-ML"
 #]
 
+
 pf_order = [
     "Portfolio-ML",
     "Static-ML", "Static-ML*", "Market", "1/N",
