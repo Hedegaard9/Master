@@ -198,6 +198,7 @@ def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, c
     result["pf"]["cluster"] = cf_cluster
     return result["pf"]
 
+
 # Mean-Variance Efficient Portfolios of Risky Assets
 def mv_risky_fun(data, cov_list, wealth, dates, gam, u_vec):
     # Filter relevant data
