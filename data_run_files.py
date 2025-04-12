@@ -234,7 +234,7 @@ def monthly_returns(risk_free, h_list, file_path):
 
     # Kombiner alle resultater til én samlet DataFrame
     final_result = pd.concat(results, ignore_index=True)
-    final_result.to_csv("data_test/monthly_preprocessed_test.csv", index=False)
+    final_result.to_csv(file_path, index=False)
     # Returner den kombinerede DataFrame
     return final_result
 
