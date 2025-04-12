@@ -3,9 +3,9 @@ import pybind11
 
 # Stier fra vcpkg
 #vcpkg_path = "C:/Users/andre/PycharmProjects/Master/vcpkg/installed/x64-windows"
-vcpkg_path = "./vcpkg/installed/x64-windows"
-armadillo_include = f"{vcpkg_path}/include"
-armadillo_lib = f"{vcpkg_path}/lib"
+#vcpkg_path = "./vcpkg/installed/x64-windows"
+#armadillo_include = f"{vcpkg_path}/include"
+#armadillo_lib = f"{vcpkg_path}/lib"
 
 ext_modules = [
     Extension(
