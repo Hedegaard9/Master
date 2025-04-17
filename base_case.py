@@ -51,10 +51,8 @@ rw = portfolio_choice_functions.rw_implement(data=chars, wealth=wealth, dates=da
 mv = portfolio_choice_functions.mv_implement(data=chars, cov_list=barra_cov ,wealth=wealth, dates=dates_oos, pf_set= pf_set)
 
 
-# Saml porteføljerne i én DataFrame
 bm_pfs = pd.concat([tpf["pf"], factor_ml["pf"], ew["pf"], mkt["pf"], rw["pf"], mv["pf"]], ignore_index=True)
 
-# Gem resultatet som en CSV-fil
 bm_pfs.to_csv(f"{output_path}/bms.csv", index=False)
 
 
@@ -62,14 +60,14 @@ static = portfolio_choice_functions.static_implement(
     data_tc=chars,
     cov_list=barra_cov,
     lambda_list=lambda_list,
-    rf=risk_free,              # Data
+    rf=risk_free,
     wealth=wealth,
     mu=pf_set['mu'],
-    gamma_rel=pf_set['gamma_rel'],  # Investor
+    gamma_rel=pf_set['gamma_rel'],
     dates_full=dates_m1,
     dates_oos=dates_oos,
     dates_hp=dates_hp,
-    hp_years=hp_years,          # Dates
+    hp_years=hp_years,
     k_vec=settings['pf']['hps']['static']['k'],
     u_vec=settings['pf']['hps']['static']['u'],
     g_vec=settings['pf']['hps']['static']['g'],
