@@ -572,120 +572,256 @@ def static_implement(data_tc, cov_list, lambda_list, rf,
     return {"hps": validation, "best_hps": optimal_hps, "w": w, "pf": pf}
 
 
-def pfml_search_coef(pfml_input, p_vec, l_vec, hp_years, orig_feat):  # virker kun for et p so far.
-    # Konverter nøglerne (datoer) til datetime-objekter
-    reals = pfml_input["reals"]
-    # Vi antager, at nøglerne kan konverteres med pd.to_datetime
-    d_all = {pd.to_datetime(k): k for k in reals.keys()}
+def pfml_search_coef(pfml_input, p_vec, l_vec, hp_years, orig_feat):
+    """
+    Beregner de bedste koefficienter for hver p og l for hvert hp-år.
 
-    # Bestem end_bef = min(hp_years) - 1 (fx hvis det mindste hp_year er 2016, så er end_bef 2015)
-    end_bef = 2021  # - 1
-    # Vælg træningsdata før: datoer < (min(hp_years)-2)-12-31
+    pfml_input: en dictionary med nøglen "reals". Forvent, at pfml_input["reals"] er en dictionary,
+                hvor nøglerne er datoer (som pd.Timestamp eller kan konverteres til sådanne) og
+                værdierne er dictionaries med mindst:
+                  - "r_tilde": en numpy-array (vektor)
+                  - "denom": en numpy-matrix
+    p_vec: liste over p-værdier.
+    l_vec: liste over l-værdier.
+    hp_years: liste over hp-år (f.eks. årstal som integers).
+    orig_feat: ekstra argument til pfml_feat_fun.
+
+    Returnerer:
+      coef_list: en dictionary, hvor nøglerne er hp-år (som str) og værdierne er dictionaries,
+                 der for hver p (som str) indeholder en liste med koefficienter for hver l-værdi.
+    """
+    # Første del: Udregn gennemsnit før hp_years
+    # Konverter nøglerne til pd.Timestamp (hvis de ikke allerede er)
+    d_all = np.array([pd.to_datetime(k) for k in pfml_input["reals"].keys()])
+
+    end_bef = min(hp_years) - 1
+    # Filter: træningsdata før (end_bef-1)-12-31 (<, da returns er fra eom+months(1))
     cutoff_date = pd.to_datetime(f"{end_bef - 1}-12-31")
-    train_bef = {k: reals[d_all[k]] for k in d_all if k < cutoff_date}
+    train_bef = {d: pfml_input["reals"][d] for d in pfml_input["reals"]
+                 if pd.to_datetime(d) < cutoff_date}
 
-    # Beregn sum af r_tilde over træningssættet.
-    # Her antages det, at hver x['r_tilde'] er en pandas Series med index svarende til feature-navne.
-    r_tilde_list = [item['r_tilde'] for item in train_bef.values()]
-    # Summering: her benyttes sum() til pandas Series (forudsætter, at listen ikke er tom)
-    r_tilde_sum = sum(r_tilde_list) if r_tilde_list else pd.Series(0)
+    # Sum af r_tilde-vektorer over træningsdataene
+    # For hver træningsdato antages x["r_tilde"] at være en numpy-array
+    r_tilde_sum = None
+    for x in train_bef.values():
+        if r_tilde_sum is None:
+            r_tilde_sum = np.array(x["r_tilde"])
+        else:
+            r_tilde_sum += np.array(x["r_tilde"])
 
-    # Tilsvarende: sum af 'denom'-matricer (antages at være pandas DataFrames med feature-navne som index/columns)
-    denom_list = [item['denom'] for item in train_bef.values()]
-    denom_raw_sum = sum(denom_list) if denom_list else pd.DataFrame(0)
+    # Beregn summen af 'denom'-matricerne over træningsdataene vha. denom_sum_fun
+    denom_raw_sum = denom_sum_fun(train_bef)
 
-    # n er antallet af observationer i train_bef
-    n = len(train_bef)  # skal evt ændres
+    n = len(train_bef)
 
-    # Sorter hp_years, og opret en ordbog til at holde koefficienterne
+    # Sortér hp_years
     hp_years = sorted(hp_years)
-    coef_list = {}
+    coef_list = {}  # Vil indeholde koefficienter for hvert hp-år (som str)
 
-    # For hvert hp_year
-    for hp in hp_years:
-        # Udvælg nye træningsobservationer: datoer i intervallet
-        # [ (hp-2)-12-31, (hp-1)-11-30 ]
-        lower_bound = pd.to_datetime(f"{hp - 2}-12-31")
-        upper_bound = pd.to_datetime(f"{hp - 1}-11-30")
+    for end in hp_years:
+        # For dette hp-år
+        # Træningsdata for d mellem (end-2)-12-31 og (end-1)-11-30
+        lower_bound = pd.to_datetime(f"{end - 2}-12-31")
+        upper_bound = pd.to_datetime(f"{end - 1}-11-30")
+        train_new = {d: pfml_input["reals"][d] for d in pfml_input["reals"]
+                     if lower_bound <= pd.to_datetime(d) <= upper_bound}
 
-        train_new = {k: reals[d_all[k]] for k in d_all if lower_bound <= k <= upper_bound}
-
-        # Opdater antallet af observationer
         n += len(train_new)
-        # Opdater r_tilde_sum med de nye r_tilde-værdier
-        r_tilde_new = sum([item['r_tilde'] for item in train_new.values()]) if len(train_new) > 0 else 0
-        r_tilde_sum = r_tilde_sum + r_tilde_new
+        # Opdater r_tilde_sum med nye data
+        for x in train_new.values():
+            r_tilde_sum += np.array(x["r_tilde"])
+        # Opdater denom_raw_sum
+        denom_raw_new = denom_sum_fun(train_new)
+        denom_raw_sum += denom_raw_new
 
-    # Opdater denom-summen
-    denom_raw_new = sum([item['denom'] for item in train_new.values()]) if len(train_new) > 0 else 0
-    denom_raw_sum = denom_raw_sum + denom_raw_new
-
-    # For hvert p i p_vec, beregn de tilhørende koefficienter
-    coef_by_hp = {}
-    # Hent feature-navnene givet p og om de originale features skal medtages
-    feat_p = pfml_feat_fun(p, orig_feat)
-    # r_tilde_sub: udtræk de features fra r_tilde_sum og divider med n
-    r_tilde_sum = pd.Series(r_tilde_sum, index=all_feat)
-
-    r_tilde_sub = r_tilde_sum.loc[feat_p] / n
-    # denom_sub: udtræk de relevante rækker og kolonner fra denom_raw_sum og divider med n
-    denom_raw_sum.index = all_feat
-    denom_raw_sum.columns = all_feat
-
-    denom_sub = denom_raw_sum.loc[feat_p, feat_p] / n
-
-    results = {}
-    for l in l_vec:
-        M = denom_sub + l * np.eye(len(feat_p))
-        # Løs det lineære system: M * coef = r_tilde_sub
-        coef = np.linalg.solve(M.values, r_tilde_sub.values)
-        # Gem resultatet som en pandas Series med index = feat_p
-        results[l] = pd.Series(coef, index=feat_p)
-    # Gem resultaterne for den aktuelle p-værdi
-    coef_by_hp[p] = results
-    # Gem koefficienterne for det aktuelle hp_year, brug hp som streng
-    coef_list[str(hp)] = coef_by_hp
+        # For hver p-værdi, beregn koefficienterne for hver l-værdi
+        coef_by_hp = {}
+        for p in p_vec:
+            feat_p = pfml_feat_fun(p=p, orig_feat=orig_feat)  # skal returnere en liste/array af indekser
+            feat_indices = [feat_p.index(f) for f in feat_p if f in feat_p]
+            r_tilde_sub = r_tilde_sum[feat_indices] / n
+            denom_sub = denom_raw_sum.to_numpy()[np.ix_(feat_indices, feat_indices)] / n
+            # For hver l-værdi, beregn koefficienten som: solve(denom_sub + l*diag(p+1)) %*% r_tilde_sub
+            # Bemærk: diag(p+1) antages at skabe en diagonal matrix med dimension len(feat_p)
+            results = {}
+            for l in l_vec:
+                A = denom_sub + l * np.eye(len(feat_p))
+                coef = np.linalg.solve(A, r_tilde_sub)
+                results[str(l)] = coef
+            coef_by_hp[str(p)] = results
+        coef_list[str(end)] = coef_by_hp
 
     return coef_list
 
 
 # Feature names
-def pfml_feat_fun(p, orig_feat, features=None):
-    """
-    Returnerer en liste af feature-navne.
-
-    Parametre:
-      p         : Antal RFF-features (skal være deleligt med 2). Hvis p er 0, bruges ingen RFF-features.
-      orig_feat : Bool – om de originale features skal inkluderes.
-      features  : Liste af originale feature-navne. Skal gives, hvis orig_feat er True.
-
-    Returnerer:
-      En liste med feature-navne.
-    """
+def pfml_feat_fun(p, orig_feat, features):
     feat = ["constant"]
     if p != 0:
-        half_p = p // 2
-        feat.extend([f"rff{i}_cos" for i in range(1, half_p + 1)])
-        feat.extend([f"rff{i}_sin" for i in range(1, half_p + 1)])
-    if orig_feat and features is not None:
-        feat.extend(features)
+        # Antag at p er et lige tal, så vi deler med 2 og laver features for cos og sin.
+        feat += [f"rff{i}_cos" for i in range(1, int(p/2)+1)]
+        feat += [f"rff{i}_sin" for i in range(1, int(p/2)+1)]
+    if orig_feat:
+        feat += features  # 'features' skal være defineret globalt (f.eks. en liste)
     return feat
 
+
+def pfml_w(data, dates, cov_list, lambda_list, gamma_rel, iter, risk_free, wealth, mu, aims):
+    """
+    Beregner Portfolio-ML weights.
+
+    Parametre:
+      data      : DataFrame med f.eks. kolonnerne 'id', 'eom', 'valid', 'ret_ld1', 'tr_ld0', 'mu_ld0'.
+      dates     : Liste (eller array) af datoer (f.eks. som str i formatet 'YYYY-MM-DD').
+      cov_list  : Dictionary med kovariansdata, nøgler svarende til datoer (som str eller pd.Timestamp).
+      lambda_list: Dictionary med lambda-data, nøgler svarende til datoer.
+      gamma_rel : Skalar.
+      iter      : Antal iterationer til m_func.
+      risk_free : DataFrame med kolonnerne 'eom' og 'rf'.
+      wealth    : DataFrame med kolonnerne 'eom' og 'wealth'.
+      mu        : Skalar (forventet afkast ud over rf).
+      aims      : Aim-portefølje; hvis None, oprettes den ud fra signal_t og aim_coef (se nedenfor).
+
+    Returnerer:
+      fa_weights : DataFrame med de opdaterede vægte.
+    """
+
+    # --- Opret Aim Portfolio, hvis ikke angivet ---
+    # Her antages det, at der findes en global dictionary 'signal_t' og en variabel 'aim_coef'
+    # Som i R: hvis aims er None, så opret den ud fra hver dato i dates.
+    if aims is None:
+        aims_list = []
+        for d in dates:
+            # Filtrer data for denne dato
+            data_d = data[data['eom'] == d][['id', 'eom']].copy()
+            # Hent signal for d fra den globale signal_t
+            s = signal_t.get(d, None)
+            if s is None:
+                print(f"Ingen signal fundet for dato {d}")
+                continue
+            # Hvis aim_coef er en liste (eller dict) med årstal, så brug koefficient for året for d
+            # Vi antager, at d kan konverteres til et årstal.
+            year_d = pd.to_datetime(d).year
+            if isinstance(aim_coef, dict):
+                coef = aim_coef.get(str(year_d), aim_coef)  # Hvis nøglen ikke findes, brug hele aim_coef
+            else:
+                coef = aim_coef
+            # Beregn w_aim = s @ coef. For at fjerne overflødige dimensioner anvendes .squeeze()
+            data_d['w_aim'] = np.squeeze(s @ coef)
+            aims_list.append(data_d)
+        if len(aims_list) > 0:
+            aims = pd.concat(aims_list, ignore_index=True)
+        else:
+            aims = None
+
+    # --- Start med initial weights: Brug VW (vægtet) hvis første observation, ellers brug eksisterende weights ---
+    # Antag, at initial_weights_new er en hjælpefunktion, der returnerer en DataFrame med kolonnerne 'id', 'eom', 'w_start'
+    fa_weights = General_Functions.initial_weights_new(data, w_type="vw")
+    # Merge med de kolonner, der er nødvendige fra data (f.eks. 'tr_ld1')
+    fa_weights = pd.merge(fa_weights, data[['id', 'eom', 'tr_ld1']], on=['id', 'eom'], how='left')
+    # Merge med wealth for at få 'mu_ld1'
+    fa_weights = pd.merge(fa_weights, wealth[['eom', 'mu_ld1']], on='eom', how='left')
+
+    # --- For hver dato i dates: beregn m og opdater vægtene ---
+    for d in dates:
+        # d er en streng (f.eks. 'YYYY-MM-DD')
+        # Opret datoen som pd.Timestamp for sammenligning
+        d_ts = pd.to_datetime(d)
+        # Hent ids for observationer i data for denne dato
+        ids = data[data['eom'] == d]['id'].unique().astype(str).tolist()
+        d_str = d.strftime('%Y-%m-%d')
+        #     print("d_str")
+        #     print(d_str)
+        # Opret sigma og lambda for de givne ids. Her antages, at cov_list og lambda_list benyttes med nøglen d.
+        # Vi konverterer nøglen til pd.Timestamp for at matche, hvis nødvendigt.
+        # sigma = General_Functions.create_cov(cov_list[pd.to_datetime(d)], ids=ids)
+        # sigma = General_Functions.create_cov(cov_list[d.strftime('%Y-%m-%d')], ids=ids)  # rettet her sidste # har virket
+        sigma = General_Functions.create_cov(cov_list[d_str], ids=ids)
+        lambda_series = pd.Series(lambda_list[d_str])
+        lambda_series.index = lambda_series.index.astype(str)
+        lam = create_lambda(lambda_series, ids=ids)
+        w = wealth[wealth['eom'] == d]['wealth'].iloc[0]
+        rf_val = risk_free[risk_free['eom'] == d]['rf'].iloc[0]
+        m = portfolio_choice_functions.m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
+                                              lambda_mat=lam, iter=iter)
+        # lam = create_lambda(lambda_list[pd.to_datetime(d)], ids=ids) # Gamle funktion
+        # Hent wealth og rf for denne dato
+        iden = np.eye(m.shape[0])
+
+        # Hent de nuværende weights fra fa_weights for denne dato og merge med aims (baseret på id og eom)
+        # Vi antager, at 'aims' har kolonnerne 'id', 'eom', 'w_aim'
+        w_cur = pd.merge(fa_weights[fa_weights['eom'] == d], aims, on=['id', 'eom'], how='left')
+        # Beregn w_opt: m @ w_start + (iden - m) @ w_aim
+        # Her antages, at w_start og w_aim er kolonner i w_cur, og at de er arrays (eller skalarer)
+        w_cur['w_opt'] = (m @ w_cur['w_start'].values) + ((iden - m) @ w_cur['w_aim'].values)
+        print(w_cur['w_opt'])
+        # Update weight matrix:
+        # Find næste måned: antag, at dates er sorteret; brug listeindeks
+        # Beregn næste måned direkte fra dates-listen
+        # Bestem næste måneds dato (som streng)
+        try:
+            current_index = dates.get_loc(d)
+            next_month = dates[current_index + 1]
+            next_month_str = next_month.strftime('%Y-%m-%d')
+            next_month = next_month_str
+            print("next_month")
+            print(next_month)
+        except IndexError:
+            next_month = None
+
+        # Beregn w_opt_ld1 = w_opt * (1 + tr_ld1) / (1 + mu_ld1)
+        w_cur['w_opt_ld1'] = w_cur['w_opt'] * (1 + w_cur['tr_ld1']) / (1 + w_cur['mu_ld1'])
+        # print(w_cur.dtypes)
+
+        fa_weights = pd.merge(w_cur[['id', 'w_opt', 'w_opt_ld1', 'eom']],
+                              fa_weights, on=['id', 'eom'], how='right')
+
+        mask_current = (fa_weights['eom'] == d) & (fa_weights['w_opt'].notna())
+        fa_weights.loc[mask_current, 'w'] = fa_weights.loc[mask_current, 'w_opt']
+        # print("fa_weights 2")
+        # print(fa_weights)
+
+        # For rækker med eom == next_month, sæt w_start til w_opt_ld1
+        if next_month is not None:
+            # Lav en kopi af w_cur og opdater 'eom' til next_month
+            w_cur_next = w_cur.copy()
+            # Bevar datatype som datetime
+            w_cur_next['eom'] = pd.to_datetime(next_month)
+            # print(w_cur_next.dtypes)
+
+            # Merge w_cur_next med fa_weights for at få next_month-værdierne med w_opt_ld1
+            fa_weights = pd.merge(w_cur_next[['id', 'w_opt_ld1', 'eom']],
+                                  fa_weights, on=['id', 'eom'], how='right', suffixes=('_next', ''))
+
+            mask_next = (fa_weights['eom'] == pd.to_datetime(next_month)) & (fa_weights['w_opt_ld1_next'].notna())
+            fa_weights.loc[mask_next, 'w_start'] = fa_weights.loc[mask_next, 'w_opt_ld1_next']
+
+            mask_next_na = (fa_weights['eom'] == pd.to_datetime(next_month)) & (fa_weights['w_start'].isna())
+            fa_weights.loc[mask_next_na, 'w_start'] = 0
+            fa_weights.drop(columns=['w_opt_ld1_next'], inplace=True)
+
+        fa_weights.drop(columns=['w_opt', 'w_opt_ld1'], inplace=True)
+
+    return fa_weights
 
 #Portfolio-ML Inputs
 def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates, lb, scale,
                    risk_free, features, rff_feat, seed, p_max, g, add_orig, iter, balanced):
+    # Konverter nøglerne i cov_list og lambda_list til pd.Timestamp
+    cov_list = {pd.to_datetime(key): value for key, value in cov_list.items()}
+    lambda_list = {pd.to_datetime(key): value for key, value in lambda_list.items()}
+
     # --- Lookback-datoer ---
     min_date = min(dates)
     max_date = max(dates)
     start_date = (min_date + pd.Timedelta(days=1)) - MonthEnd(lb + 1)
     dates_lb = pd.date_range(start=start_date, end=max_date, freq=MonthEnd())
-    print(dates_lb)
+
     # --- Oprettelse af Random Fourier Features ---
     if rff_feat:
         np.random.seed(seed)
         X_features = data_tc[features].values
-        rff_x = rff(X_features, p=p_max, g=g)
+        rff_x = rff(X_features, p=p_max, g=g)  # Forudsætter, at funktionen rff er defineret
         rff_w = rff_x['W']
         X_cos = rff_x['X_cos']
         X_sin = rff_x['X_sin']
@@ -704,7 +840,7 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
         data = data_tc[cols].copy()
         feat_new = features.copy()
 
-    # Konverter 'eom' til string-format så vi får samme format i hele funktionen
+    # Konverter 'eom' til str for konsistens
     data['eom'] = pd.to_datetime(data['eom']).dt.strftime('%Y-%m-%d')
 
     feat_cons = feat_new + ['constant']
@@ -714,7 +850,8 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
         scales_list = []
         for d in dates_lb:
             d_str = d.strftime('%Y-%m-%d')
-            sigma = General_Functions.create_cov(cov_list[d_str])
+            # Bemærk: Her benyttes pd.to_datetime(d_str) for at sikre, at nøglen passer til cov_list
+            sigma = General_Functions.create_cov(cov_list[pd.to_datetime(d_str)])
             if hasattr(sigma, 'values'):
                 sigma_vals = sigma.values
                 ids_sigma = sigma.index.astype(float)
@@ -724,7 +861,7 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             diag_vol = np.sqrt(np.diag(sigma_vals))
             df_scales = pd.DataFrame({
                 'id': ids_sigma,
-                'eom': d_str,  # Brug d_str for konsistens
+                'eom': d_str,
                 'vol_scale': diag_vol
             })
             scales_list.append(df_scales)
@@ -746,28 +883,22 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
     signal_t_dict = {}
 
     for d in dates:
-        if d.year % 10 == 0 and d.month == 1:
-            print(f"--> PF-ML inputs: {d}")
-
         d_str = d.strftime('%Y-%m-%d')
-        print("d", d)
-        print("d_str", d_str)
         data_ret = data[(data['valid'] == True) & (data['eom'] == d_str)][['id', 'ret_ld1']]
         ids = data_ret['id'].unique()  # ids som ints
         n = len(ids)
         r_vec = data_ret['ret_ld1'].values
 
-        # Brug de korrekte key-typer til både sigma og lambda
-        sigma = General_Functions.create_cov(cov_list[d_str], ids=ids)
-        lambda_series = pd.Series(lambda_list[d_str])
-        lambda_mat = General_Functions.create_lambda(lambda_series, ids=ids)
+        # Her skal vi bruge cov_list med en nøgle, der er pd.Timestamp
+        sigma = General_Functions.create_cov(cov_list[pd.to_datetime(d_str)], ids=ids)
+        lambda_series = pd.Series(lambda_list[pd.to_datetime(d_str)])
+        lambda_mat = create_lambda(lambda_series, ids=ids)
 
-        w = wealth.loc[wealth['eom'] == d_str, 'wealth'].iloc[0]
-        rf = risk_free.loc[risk_free['eom'] == d_str, 'rf'].iloc[0]
-        m = m_func(w=w, mu=mu, rf=rf, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
-                   lambda_mat=lambda_mat, iter=iter)
+        w = wealth.loc[wealth['eom'] == pd.to_datetime(d_str), 'wealth'].iloc[0]
+        rf_val = risk_free.loc[risk_free['eom'] == d_str, 'rf'].iloc[0]
+        m = portfolio_choice_functions.m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
+                                              lambda_mat=lambda_mat, iter=iter)
 
-        # Brug MonthEnd til at beregne lower_bound – konverter til string-format
         lower_bound = (d - MonthEnd(lb)).strftime('%Y-%m-%d')
         data_sub = data[(data['id'].isin(ids)) & (data['eom'] >= lower_bound) & (data['eom'] <= d_str)].copy()
 
@@ -780,25 +911,18 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
                     lambda x: x * np.sqrt(1 / np.sum(x ** 2)) if np.sum(x ** 2) != 0 else 0)
 
         data_sub = data_sub.sort_values(by=['eom', 'id'], ascending=[False, True])
-        # Gruppér efter 'eom' – vi konverterer gruppenøglerne til string-format for konsistens
         groups = {k: group for k, group in data_sub.groupby('eom')}
 
-        # Beregn signaler med diagnose: udskriv kun hvis NaN, Inf, tom DataFrame eller tomt index
         signals = {}
         for eom_val, group in groups.items():
-            if group.empty or group.index.empty:
-                print(f"Advarsel: Gruppe for {eom_val} er tom!")
             s = group[feat_cons].values
             if scale:
                 s = np.diag(1 / group['vol_scale'].values) @ s
-            # Tjek for NaN eller Inf
-            if np.isnan(s).any():
-                print(f"Advarsel: Signal for {eom_val} indeholder NaN. Form: {s.shape}")
-            if np.isinf(s).any():
-                print(f"Advarsel: Signal for {eom_val} indeholder Inf. Form: {s.shape}")
+            if np.isnan(s).any() or np.isinf(s).any():
+                print(f"Advarsel: Signal for {eom_val} indeholder NaN eller Inf.")
             signals[eom_val] = s
-        print("signaler", signals)
-        d_key = d_str  # d_str er allerede i '%Y-%m-%d'-format
+
+        d_key = d_str
         signal_current = signals.get(d_key, None)
         if signal_current is None:
             print(f"Advarsel: Ingen signal fundet for {d_key}.")
@@ -807,14 +931,12 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             print(f"Advarsel: Signal for {d_key} indeholder NaN eller Inf, springer denne dato over.")
             continue
 
-        # Beregn gtm for hver gruppe
         gtm = {}
         for eom_val, group in groups.items():
             gt = (1 + group['tr_ld0']) / (1 + group['mu_ld0'])
             gt = gt.fillna(1).values
             gtm[eom_val] = m @ np.diag(gt)
 
-        # Aggregér gtm over lookback-perioden
         n_stocks = n
         gtm_agg = {}
         gtm_agg_l1 = {}
@@ -822,11 +944,6 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
         gtm_agg_l1[d_key] = np.eye(n_stocks)
         for i in range(1, lb + 1):
             d_i = (d - MonthEnd(i)).strftime('%Y-%m-%d')
-            # DEBUG: Udskriv unikke 'eom'-datoer for denne lookback-dato
-            lookback_date = pd.to_datetime(d_i)
-            unique_dates = data[data['eom'] == lookback_date.strftime('%Y-%m-%d')]['eom'].unique()
-            print(f"Lookup for lookback-dato: {d_i} - Unikke eom-datoer fundet: {unique_dates}")
-
             if d_i in gtm:
                 gtm_agg[d_i] = gtm_agg[list(gtm_agg.keys())[-1]] @ gtm[d_i]
             else:
@@ -837,7 +954,6 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             else:
                 gtm_agg_l1[d_i] = gtm_agg_l1[list(gtm_agg_l1.keys())[-1]]
 
-        # Summering over lookback: opbyg omega og konstanter
         omega_sum = None
         const_sum = None
         omega_l1_sum = None
@@ -846,7 +962,7 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             d_i = (d - MonthEnd(i)).strftime('%Y-%m-%d')
             s_i = signals.get(d_i, None)
             if s_i is None:
-                print(f"Advarsel: Ingen signal fundet for lookback-dato d_i {d_i}")
+                # print(f"Advarsel: Ingen signal fundet for lookback-dato {d_i}")
                 term = np.zeros((n_stocks, len(feat_cons)))
             else:
                 term = gtm_agg.get(d_i, np.eye(n_stocks)) @ s_i
@@ -860,7 +976,7 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             d_i_l1 = (d - MonthEnd(i + 1)).strftime('%Y-%m-%d')
             s_i_l1 = signals.get(d_i_l1, None)
             if s_i_l1 is None:
-                print(f"Advarsel: Ingen signal fundet for lookback-dato d_i_l1 {d_i_l1}")
+                # print(f"Advarsel: Ingen signal fundet for lookback-dato {d_i_l1}")
                 term_l1 = np.zeros((n_stocks, len(feat_cons)))
             else:
                 term_l1 = gtm_agg_l1.get(d_i_l1, np.eye(n_stocks)) @ s_i_l1
@@ -871,11 +987,9 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
                 omega_l1_sum = omega_l1_sum + term_l1
                 const_l1_sum = const_l1_sum + gtm_agg_l1.get(d_i_l1, np.eye(n_stocks))
 
-        # Løs de lineære systemer
         omega_final = np.linalg.solve(const_sum, omega_sum)
         omega_l1_final = np.linalg.solve(const_l1_sum, omega_l1_sum)
 
-        # Beregn gt for den aktuelle gruppe (d)
         if d_key in signals:
             group_d = groups.get(d_key, None)
             if group_d is None:
@@ -888,7 +1002,6 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
 
         omega_chg = omega_final - gt_mat @ omega_l1_final
 
-        # --- Realiseringer ---
         r_tilde = omega_final.T @ r_vec
         risk_val = gamma_rel * (omega_final.T @ sigma @ omega_final)
         tc_val = w * (omega_chg.T @ lambda_mat @ omega_chg)
@@ -901,154 +1014,114 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
             "tc": tc_val.item() if np.isscalar(tc_val) or tc_val.size == 1 else tc_val
         }
 
-        reals_dict[d_key] = reals
-        signal_t_dict[d_key] = signals.get(d_key, None)
+        reals_dict[d_str] = reals
+        signal_t_dict[d_str] = signals.get(d_str, None)
 
     return {"reals": reals_dict, "signal_t": signal_t_dict, "rff_w": rff_w if rff_feat else None}
 
 
-def pfml_cf_fun(data, cf_cluster, pfml_base, dates, cov_list, scale, orig_feat, gamma_rel, wealth, risk_free, mu, iter,
-                seed):
+def pfml_cf_fun(data, cf_cluster, pfml_base, dates, cov_list, scale, orig_feat, gamma_rel,
+                wealth, risk_free, mu, iter_, seed, features, lambda_list, dates_oos, cluster_labels):
     """
-    Portfolio-ML med kontrafaktuelle inputs.
+    Portefølje-ML counterfactual funktion.
 
     Parametre:
-        data = chars
-        cf_cluster (str): Den kontrafaktuelle klynge. Hvis denne ikke er "bm", omarrangeres id'erne.
-        pfml_base (dict): Pfml-base, fx indeholder hyperparametre og aim-koefficienter.
-        dates = dates (f.eks. out-of-sample datoer)
-        cov_list (dict): f.eks. barra
-        scale (bool): Skalering med volatilitet.
-        orig_feat (list): Oprindelige feature-navne.
-        gamma_rel (float): Parameter for risikojustering.
-        wealth (float): Formueparameter.
-        risk_free (float): Risikofri rente.
-        mu (float): Forventet afkast.
-        iter (int): Antal iterationer til optimering.
-        seed (int): Seed til randomisering.
+      cf_cluster : Navn på den cluster, der skal benyttes (fx "quality", "value", etc.).
+      pfml_base  : Objekt (f.eks. et dictionary) med en Portfolio-ML base, der indeholder best_hps_list og hps.
+      cov_list   : Dictionary med kovariansmatricer (nøgler som datoer).
+      scale      : Bool, om skalering skal udføres.
+      orig_feat  : Bool, om originale features skal medtages.
+      gamma_rel  : Den aktuelle gamma-værdi.
+      cluster_labels : pandas DataFrame med kolonnerne "cluster" og "characteristic".
 
-    Eksempel:
-    pf_cf = pfml_cf_fun(data=chars, cf_cluster="bm", pfml_base=pfml, dates= dates_oos, cov_list=barra_cov,
-            scale = settings['pf_ml']['scale'], orig_feat = settings['pf_ml']['orig_feat'],
-            gamma_rel =10, wealth = wealth, risk_free=risk_free , mu = pf_set['mu'], iter =10, seed =10)
     Returnerer:
-        pd.DataFrame med den kontrafaktuelle portefølje, inkl. 'w_aim', 'type' ("Portfolio-ML") og 'cluster'.
+      pf_cf : En pandas DataFrame med den counterfactual portefølje for cf_cluster.
     """
-    # --- Trin 1: Skalering af data (hvis scale er True) ---
+    np.random.seed(seed)
+
+    # Hvis scale: byg en 'scales'-tabel for hver dato
     if scale:
         scales_list = []
         for d in dates:
-            d_str = d.strftime('%Y-%m-%d')
-            sigma = General_Functions.create_cov(barra_cov[d_str])
-            if hasattr(sigma, 'values'):
-                sigma_vals = sigma.values
-                ids_sigma = sigma.index.astype(float)
-            else:
-                sigma_vals = sigma
-                ids_sigma = np.arange(sigma.shape[0])
-            diag_vol = np.sqrt(np.diag(sigma_vals))
+            # Her antages cov_list er en dictionary med nøgler, der kan konverteres til str(d)
+            sigma = create_cov(cov_list[str(d)])  # create_cov skal være defineret
+            # Forvent, at sigma er en pandas DataFrame med index som 'id'
+            diag_vol = np.sqrt(np.diag(sigma))
             df_scales = pd.DataFrame({
-                'id': ids_sigma,
-                'eom': d_str,
+                'id': sigma.index.astype(float),
+                'eom': pd.to_datetime(d),
                 'vol_scale': diag_vol
             })
             scales_list.append(df_scales)
         scales_df = pd.concat(scales_list, ignore_index=True)
-        # Konverter eom til datetime, hvis nødvendigt
-        scales_df['eom'] = pd.to_datetime(scales_df['eom'])
+        # Merge med data (forudsætter at 'id' og 'eom' eksisterer)
         data = pd.merge(data, scales_df, on=['id', 'eom'], how='left')
+        # Imputer manglende vol_scale med median pr. eom
         data['vol_scale'] = data.groupby('eom')['vol_scale'].transform(lambda x: x.fillna(x.median()))
 
-    # --- Trin 2: Sæt seed for randomisering ---
-    np.random.seed(seed)
-
-    # --- Trin 3: Forbered kontrafaktuelle data ---
-    # Forventer at 'features' er en global liste med navne på feature-kolonner.
+    # Lav counterfactual data (cf) med udvalgte kolonner
     cf = data[['id', 'eom', 'vol_scale'] + features].copy()
 
-    # --- Trin 4: Hvis cf_cluster ikke er "bm", omarranger id'erne ---
     if cf_cluster != "bm":
-        # For hver 'eom', lav en tilfældig permutation af 'id'
-        cf['id_shuffle'] = cf.groupby('eom')['id'].transform(lambda x: np.random.permutation(x.values))
-        # Vælg relevante karakteristika ud fra cluster_labels
-        chars_sub = cluster_labels.loc[
-            (cluster_labels['cluster'] == cf_cluster) & (cluster_labels['characteristic'].isin(features)),
-            'characteristic'
-        ].tolist()
-        # Lav en DataFrame med de originale feature-værdier, men med 'id' omdøbt til 'id_shuffle'
-        chars_data = cf[['id', 'eom'] + chars_sub].copy().rename(columns={'id': 'id_shuffle'})
-        # Fjern de oprindelige feature-kolonner fra cf
-        cf = cf.drop(columns=chars_sub)
-        # Merge, så de kontrafaktuelle rækker får feature-værdier fra en tilfældigt valgt (shuffled) række
-        cf = pd.merge(cf, chars_data, on=['id_shuffle', 'eom'], how='left')
+        # Shuffle id'er inden for hver eom for at få reproducerbarhed
+        cf = cf.groupby('eom', group_keys=False).apply(lambda df: df.assign(id_shuffle=np.random.permutation(df['id'])))
+        # Udvælg karakteristika for cf_cluster fra cluster_labels
+        chars_sub = cluster_labels.loc[cluster_labels['cluster'] == cf_cluster, 'characteristic'].tolist()
+        # Vælg de relevante kolonner og omdøb 'id' til 'id_shuffle'
+        chars_data = cf[['id', 'eom'] + chars_sub].rename(columns={'id': 'id_shuffle'})
+        # Merge chars_data tilbage i cf (fjern kolonnerne med chars_sub i cf før merge)
+        cf = pd.merge(cf.drop(columns=chars_sub), chars_data, on=['id_shuffle', 'eom'], how='left')
 
-    # --- Trin 5: Beregn kontrafaktuel aim-portefølje for hver dato ---
+    # Beregn counterfactual aim portfolio for hver dato i 'dates'
     aim_cf_list = []
     for d in dates:
-        # Sørg for at arbejde med data for den aktuelle dato
-        d_date = pd.to_datetime(d)
-        cf_d = cf[cf['eom'] == d_date].copy()
-        d_str = str(d_date.date())
-        # Hent hyperparametre og aim-koefficienter for datoen
-        best_hps = pfml_base['best_hps_list'][d_str]
+        # Filtrer cf for dato d
+        cf_d = cf[pd.to_datetime(cf['eom']) == pd.to_datetime(d)]
+        # Stocks er de aktuelle id'er
+        stocks = cf_d['id'].tolist()
+        # Hent base hyperparametre for dato d fra pfml_base
+        best_hps = pfml_base['best_hps_list'][str(d)]
         best_g = best_hps['g']
         best_p = best_hps['p']
-        aim_coef = best_hps['coef']  # Forventet at være et 1D numpy-array
-        best_g_str = str(best_g)
-        rff_w = pfml_base['hps'][best_g_str]['rff_w'][:, :int(best_p / 2)]
+        aim_coef = best_hps['coef']  # Forventet som en numpy array
+        # Hent rff-vægtene: antag pfml_base['hps'] er et dictionary med nøgler som str(best_g)
+        W = pfml_base['hps'][str(best_g)]['rff_w'][:, :int(best_p / 2)]
 
-        # Hent feature-input for den aktuelle dato
-        X = cf_d[features]
-        # Anvend random Fourier transformation – her antages rff returnerer en dict med 'X_cos' og 'X_sin'
-        rff_x = rff(X, p=best_p, W=rff_w)
-        X_cos = rff_x['X_cos']
-        X_sin = rff_x['X_sin']
-        s = np.hstack([X_cos, X_sin])
-        n_features = int(best_p / 2)
-        col_names = [f"rff{i + 1}_cos" for i in range(n_features)] + [f"rff{i + 1}_sin" for i in range(n_features)]
-        # Brug X.index, da dette svarer til den subset, der faktisk blev transformeret
-        s_df = pd.DataFrame(s, columns=col_names, index=X.index)
-
-        # Demean hver kolonne
+        # Beregn rff for cf_d for de givne features med W (forvent at rff returnerer en dict med 'X_cos' og 'X_sin')
+        rff_x = rff(cf_d[features].values, p=None, g=None, W=W)
+        # Kombiner X_cos og X_sin til signalmatrix
+        s = np.hstack([rff_x['X_cos'], rff_x['X_sin']])
+        # Opret DataFrame med passende kolonnenavne
+        col_names = [f"rff{i}_cos" for i in range(1, int(best_p / 2) + 1)] + [f"rff{i}_sin" for i in
+                                                                              range(1, int(best_p / 2) + 1)]
+        s_df = pd.DataFrame(s, columns=col_names, index=cf_d.index)
+        # Demean: træk kolonnegennemsnit fra hver kolonne
         s_df = s_df - s_df.mean()
-        # Tilføj konstant-kolonne med værdien 1
-        s_df['constant'] = 1
-        # Skaler hver kolonne, så L2-normen bliver 1
-        s_df = s_df.apply(lambda x: x * (1 / np.sqrt(np.sum(x ** 2))) if np.sum(x ** 2) > 0 else x)
-
-        # Omdøb/omarranger kolonnerne ifølge pfml_feat_fun
-        feat_order = portfolio_choice_functions.pfml_feat_fun(p=best_p, orig_feat=orig_feat)
-        s_df = s_df[feat_order]
-
-        # Hvis scale er True, juster med inverse volatilitetsskalaer
+        # Scale: multiplicer hver kolonne med sqrt(1/sum(x^2))
+        s_df = s_df.apply(lambda x: x * np.sqrt(1 / np.sum(x ** 2)) if np.sum(x ** 2) != 0 else x)
+        # Reorder kolonnerne, fx ved at kalde pfml_feat_fun (forvent, at den returnerer en liste med ønskede feature-navne)
+        feat = pfml_feat_fun(best_p, orig_feat)
+        s_df = s_df[feat]
         if scale:
-            vol_scales = cf_d['vol_scale'].values
-            inv_vol = np.diag(1 / vol_scales)
-            s_scaled = inv_vol @ s_df.values
-            s_df = pd.DataFrame(s_scaled, columns=s_df.columns, index=s_df.index)
-
-        # Beregn aim-vægten: matrixproduktet af s og aim_coef
+            # Anvend skalering: multiplicer med diagonal matrix 1/vol_scale for cf_d
+            scales_arr = np.diag(1 / cf_d['vol_scale'].values)
+            s_df = pd.DataFrame(scales_arr @ s_df.values, columns=s_df.columns, index=s_df.index)
+        # Beregn aim-vægten: w_aim = s_df dot aim_coef
         w_aim = s_df.values @ aim_coef
-        aim_cf_d = pd.DataFrame({
-            'id': cf_d['id'].values,
-            'eom': cf_d['eom'].values,
-            'w_aim': w_aim
-        })
-        aim_cf_list.append(aim_cf_d)
+        cf_d = cf_d[['id', 'eom']].copy()
+        cf_d['w_aim'] = w_aim
+        aim_cf_list.append(cf_d)
     aim_cf = pd.concat(aim_cf_list, ignore_index=True)
 
-    # --- Trin 6: Beregn den kontrafaktuelle portefølje ---
-    data_subset = data[(data['eom'].isin(dates_oos)) & (data['valid'] == True)][
-        ['id', 'eom', 'eom_ret', 'me', 'tr_ld1', 'valid']].copy()
-    w_cf = pfml_w(data_subset, dates=dates, cov_list=cov_list, lambda_list=lambda_list, gamma_rel=gamma_rel,
-                  iter=iter, risk_free=risk_free, wealth=wealth, mu=mu, aims=aim_cf)
-
-    # --- Trin 7: Beregn porteføljens tidsserieudvikling ---
-    pf_cf = General_Functions.pf_ts_fun(w_cf, data=data, wealth=wealth, gam=gamma_rel)
+    # Beregn counterfactual portefølje ved at kalde pfml_w på out-of-sample data
+    data_oos = data[(pd.to_datetime(data['eom']).isin(pd.to_datetime(dates_oos))) & (data['valid'] == True)]
+    w_cf = pfml_w(data_oos, dates=dates, cov_list=cov_list, lambda_list=lambda_list, gamma_rel=gamma_rel,
+                  iter_=iter_, risk_free=risk_free, wealth=wealth, mu=mu, aims=aim_cf)
+    pf_cf = pf_ts_fun(w_cf, data=data, wealth=wealth, gam=gamma_rel)
     pf_cf['type'] = "Portfolio-ML"
 
-    # --- Trin 8: Tilføj klyngeinformation og returner resultatet ---
     pf_cf['cluster'] = cf_cluster
     return pf_cf
+
 
 
