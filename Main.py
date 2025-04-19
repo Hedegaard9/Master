@@ -74,7 +74,7 @@ txt_size = 10
 output_path_fig = "Figures"
 file_format = "pdf"
 fig_h = 3.2
-fig_w = 6.5  # Roughly the page width
+fig_w = 6.5
 
 
 # Setup -------------------------------------------
@@ -119,7 +119,7 @@ settings = {
                 "k": [1, 2, 3],
                 "u": [0.25, 0.5, 1],
                 "g": [0, 1, 2],
-                "K": 12   # ændret fra 12 #WHY DET FUCK ER DEN ÆNDRET?... Brugte 1 time på at finde denne fejll.....
+                "K": 12
             },
             "static": {
                 "k": [1 / 1, 1 / 3, 1 / 5],
@@ -208,7 +208,7 @@ features = [
   "rvol_252d"
 ]
 print(f"Features list length: {len(features)}")
-# Exclude features without sufficient coverage
+# Ekskluder features uden nok data
 feat_excl = [
                "capex_abn", "capx_gr2", "capx_gr3", "debt_gr3", "dgp_dsale",
                "dsale_dinv", "dsale_drec", "dsale_dsga", "earnings_variability", "eqnetis_at",

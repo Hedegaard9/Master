@@ -14,13 +14,9 @@ def get_latest_ticker_data(input_file, output_file):
     #latest_ticker_data = get_latest_ticker_data('data/crsp_a_stock_codes.csv', 'Data/ticker_and_id.csv')
 
     """
-    # Indlæs data
     ticker_data = pd.read_csv(input_file)
-
-    # Konverter 'date' til datetime
     ticker_data["date"] = pd.to_datetime(ticker_data["date"])
 
-    # Filtrer relevante kolonner
     df_filtered = ticker_data[["PERMNO", "TICKER", "COMNAM", "date"]]
 
     # Behold kun den seneste dato per unikt PERMNO
