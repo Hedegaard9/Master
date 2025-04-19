@@ -264,7 +264,7 @@ def ridge_hp_search(data, feat, vol_scale, lambdas):
     # Ridge regression hyperparametertuning
     val_errors = []
     for l in lambdas:
-        ridge = Ridge(alpha=l, fit_intercept=True, normalize=False)  # Standardiserer features
+        ridge = Ridge(alpha=l, fit_intercept=True, normalize=True)  # Standardiserer features
         ridge.fit(X_train, y_train)
         y_pred_val = ridge.predict(X_val)
         mse = mean_squared_error(y_val, y_pred_val)
@@ -286,7 +286,7 @@ def ridge_hp_search(data, feat, vol_scale, lambdas):
     opt_lambda = lambda_search.loc[lambda_search["mse"].idxmin(), "lambda"]
 
     # Forudsigelser på valideringsdata
-    ridge_opt = Ridge(alpha=opt_lambda, fit_intercept=True, normalize=False)
+    ridge_opt = Ridge(alpha=opt_lambda, fit_intercept=True, normalize=True)
     ridge_opt.fit(X_train, y_train)
     pred_val_op = data["val"][["id", "eom", "eom_pred_last"]].copy()
     pred_val_op["pred"] = ridge_opt.predict(X_val)
