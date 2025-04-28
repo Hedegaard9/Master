@@ -27,7 +27,6 @@ def data_split(data, type, val_end, val_years, train_start, train_lookback, retr
         dict: Dictionary med train, validation, test og fuld træning.
     """
 
-    # Konverter datoer til datetime-format
     val_end = pd.to_datetime(val_end)
     train_start = pd.to_datetime(train_start)
     test_end = pd.to_datetime(test_end)
@@ -42,7 +41,8 @@ def data_split(data, type, val_end, val_years, train_start, train_lookback, retr
     op["train"] = data[(data["eom"] >= train_start) & (data["eom_pred_last"] <= train_end)]
     op["train_full"] = data[(data["eom"] >= (val_end - relativedelta(years=retrain_lookback))) & (data["eom_pred_last"] <= val_end)]
     op["test"] = data[(data["eom"] >= val_end) & (data["eom"] < min(val_end + relativedelta(years=test_inc), test_end))]
-
+    # Valend burde være skarpt større i test potentielt
+    # loop igennem og tjek om nogle er de samme i de forskellige splits
     return op
 
 def ols_fit(data, feat):
@@ -71,14 +71,12 @@ def ols_fit(data, feat):
     train_data = data["train_full"]
     test_data = data["test"]
 
-    # Tjek om features findes i dataset
     missing_features = [col for col in feat if col not in train_data.columns]
     if missing_features:
         raise ValueError(f"Manglende kolonner i træningsdata: {missing_features}")
 
-    # Konstruér formel til OLS-regression (som i R's `lm` funktion)
     X_train = train_data[feat]
-    X_train = sm.add_constant(X_train)  # Tilføj konstant (intercept)
+    X_train = sm.add_constant(X_train)
     y_train = train_data["ret_pred"]
 
     # Fit OLS model
@@ -89,7 +87,6 @@ def ols_fit(data, feat):
     X_test = sm.add_constant(X_test)
     test_data["pred"] = model.predict(X_test)
 
-    # Returnér model og forudsigelser
     return {
         "fit": model,
         "pred": test_data[["id", "eom", "eom_pred_last", "pred"]]
@@ -123,7 +120,7 @@ def rff(X, p=None, g=None, W=None):
     if p % 2 != 0:
         raise ValueError("p skal være delbart med 2!")
 
-    # Generér vægtmatrix W, hvis ikke angivet
+    # Generér vægtmatrix W
     if W is None:
         k = X.shape[1]  # Antal features (dimensionen af X)
         W = np.random.multivariate_normal(
@@ -133,7 +130,7 @@ def rff(X, p=None, g=None, W=None):
         ).T  # Transponér så dimensionerne matcher (k x p/2)
 
     # Beregn X_new = X * W
-    X_new = np.dot(X, W)  # Matrix-multiplikation
+    X_new = np.dot(X, W)
 
     # Transformer data til cosinus og sinus
     X_cos = np.cos(X_new)
@@ -198,7 +195,6 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
         # Gem W for den aktuelle g (kun én gang pr. g)
         rff_info[str(g)] = rff_train["W"]
 
-    # Saml resultaterne i en DataFrame
     val_errors_df = pd.DataFrame(val_errors_list)
     # Find de hyperparametre med lavest MSE
     opt_idx = val_errors_df["mse"].idxmin()
@@ -215,7 +211,7 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     rff_train_full = rff(data["train_full"][feat].values, p=opt_p, W=opt_W)
     X_train_full = (opt_p ** -0.5) * np.hstack((rff_train_full["X_cos"], rff_train_full["X_sin"]))
     y_train_full = data["train_full"]["ret_pred"].values
-    final_model = Ridge(alpha=opt_hps["lambda"], fit_intercept=False)
+    final_model = Ridge(alpha=opt_hps["lambda"], fit_intercept=False)  #forsøg med true og se om det giver det samme
     final_model.fit(X_train_full, y_train_full)
 
     # Forudsig på testdata
@@ -223,7 +219,6 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     X_test = (opt_p ** -0.5) * np.hstack((rff_test["X_cos"], rff_test["X_sin"]))
     preds_test = final_model.predict(X_test)
 
-    # Opret en DataFrame med forudsigelser
     pred_op = data["test"][["id", "eom", "eom_pred_last"]].copy()
     pred_op["pred"] = preds_test
 
@@ -255,7 +250,6 @@ def ridge_hp_search(data, feat, vol_scale, lambdas):
             - "feat_imp": Feature-importance fra modellen.
     """
 
-    # Træning og valideringsdata
     X_train = data["train"][feat].values
     y_train = data["train"]["ret_pred"].values
     X_val = data["val"][feat].values
@@ -442,7 +436,6 @@ def xgb_hp_search(data, feat, vol_scale, hp_grid, iter, es, cores, seed):
             "best_iter": model.best_iteration
         })
 
-    # Konverter resultater til DataFrame
     hp_search = pd.DataFrame(search_results)
 
     # Visualisering af RMSE over hyperparametre
