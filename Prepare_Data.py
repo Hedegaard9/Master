@@ -440,7 +440,6 @@ def process_all_data(file_path_usa_test, daily_file_path, file_path_world_ret, r
     chars["lambda"] = 2 / chars["dolvol"] * pi  # Beregn lambda
     chars["rvol_m"] = chars["rvol_252d"] * np.sqrt(21)  # Beregn rvol_m
 
-    # Process return-data: Indlæs og merge
     data_ret_ld1 = process_return_data(file_path_world_ret, risk_free_path)
     chars = chars.merge(data_ret_ld1, on=["id", "eom"], how="left")
 
