@@ -44,7 +44,6 @@ def add_return_predictions(chars, settings, get_from_path_model):
         # Iterer over dato-nøgler og udtræk forudsigelser
         all_preds = []
         for date_key, subdict in model_dict.items():
-            # Antag at hver subdictionary indeholder en key "pred"
             pred_df = pd.DataFrame(subdict['pred'])
             all_preds.append(pred_df)
 
