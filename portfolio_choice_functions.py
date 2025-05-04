@@ -171,7 +171,7 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
 
     # Beregn de faktiske vægte vha. w_fun (forventes defineret et andet sted)
     tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
-    # Beregn porteføljestatistikker vha. pf_ts_fun (forventes defineret et andet sted)
+    # Beregn porteføljestatistikker
     tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
     tpf_pf['type'] = "Markowitz-ML"
 

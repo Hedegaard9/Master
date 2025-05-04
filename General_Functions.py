@@ -151,8 +151,8 @@ def initial_weights_new(data, w_type, udf_weights=None):
 
     return pf_w
 
-
-def pf_ts_fun(weights, data, wealth, gam):
+# gamle uden pred_r
+def pf_ts_fun1(weights, data, wealth, gam):
     data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']]
     comb = pd.merge(weights, data_subset, on=['id', 'eom'], how='left')
 
@@ -185,6 +185,40 @@ def pf_ts_fun(weights, data, wealth, gam):
     return pf
 
 
+def pf_ts_fun(weights, data, wealth, gam):
+    data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']]
+    comb = pd.merge(weights, data_subset, on=['id', 'eom'], how='left')
+
+    wealth_subset = wealth[['eom', 'wealth']]
+    comb = pd.merge(comb, wealth_subset, on='eom', how='left')
+
+    def agg_func(g):
+        inv = np.sum(np.abs(g['w']))
+        shorting = np.sum(np.abs(g.loc[g['w'] < 0, 'w']))
+        turnover = np.sum(np.abs(g['w'] - g['w_start']))
+        r = np.sum(g['w'] * g['ret_ld1'])
+        r_pred = np.sum(g['w'] * g['pred_ld1'])  # Forventet afkast
+
+        unique_wealth = g['wealth'].unique()[0] if len(g['wealth'].unique()) > 0 else np.nan
+        tc = (unique_wealth / 2) * np.sum(g['lambda'] * ((g['w'] - g['w_start']) ** 2))
+
+        return pd.Series({
+            'inv': inv,
+            'shorting': shorting,
+            'turnover': turnover,
+            'r': r,
+            'r_pred': r_pred,  # Tilføj til output
+            'tc': tc
+        })
+
+    pf = comb.groupby('eom').apply(agg_func).reset_index()
+
+    pf['eom'] = pd.to_datetime(pf['eom'])
+    pf['eom_ret'] = pf['eom'] + MonthEnd(1)
+
+    pf = pf.drop(columns=['eom'])
+
+    return pf
 
 def size_screen_fun(chars, type):
     """
