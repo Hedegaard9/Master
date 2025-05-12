@@ -171,7 +171,7 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
 
     # Beregn de faktiske vægte vha. w_fun (forventes defineret et andet sted)
     tpf_w = w_fun(data_rel, dates, tpf_opt, wealth)
-    # Beregn porteføljestatistikker vha. pf_ts_fun (forventes defineret et andet sted)
+    # Beregn porteføljestatistikker
     tpf_pf = pf_ts_fun(tpf_w, data, wealth, gam)
     tpf_pf['type'] = "Markowitz-ML"
 
@@ -742,7 +742,7 @@ def pfml_w(data, dates, cov_list, lambda_list, gamma_rel, iter, risk_free, wealt
         lam = create_lambda(lambda_series, ids=ids)
         w = wealth[wealth['eom'] == d]['wealth'].iloc[0]
         rf_val = risk_free[risk_free['eom'] == d]['rf'].iloc[0]
-        m = portfolio_choice_functions.m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
+        m = m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
                                               lambda_mat=lam, iter=iter)
         # lam = create_lambda(lambda_list[pd.to_datetime(d)], ids=ids) # Gamle funktion
         # Hent wealth og rf for denne dato
@@ -896,7 +896,7 @@ def pfml_input_fun(data_tc, cov_list, lambda_list, gamma_rel, wealth, mu, dates,
 
         w = wealth.loc[wealth['eom'] == pd.to_datetime(d_str), 'wealth'].iloc[0]
         rf_val = risk_free.loc[risk_free['eom'] == d_str, 'rf'].iloc[0]
-        m = portfolio_choice_functions.m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
+        m = m_func(w=w, mu=mu, rf=rf_val, sigma_gam=sigma * gamma_rel, gam=gamma_rel,
                                               lambda_mat=lambda_mat, iter=iter)
 
         lower_bound = (d - MonthEnd(lb)).strftime('%Y-%m-%d')
