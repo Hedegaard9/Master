@@ -152,7 +152,7 @@ def initial_weights_new(data, w_type, udf_weights=None):
     return pf_w
 
 # gamle uden pred_r
-def pf_ts_fun1(weights, data, wealth, gam):
+def pf_ts_fun(weights, data, wealth, gam):
     data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']]
     comb = pd.merge(weights, data_subset, on=['id', 'eom'], how='left')
 
@@ -184,9 +184,9 @@ def pf_ts_fun1(weights, data, wealth, gam):
 
     return pf
 
-
-def pf_ts_fun(weights, data, wealth, gam):
-    data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda']]
+# nye til at sammenligne det
+def pf_ts_fun1(weights, data, wealth, gam):
+    data_subset = data[['id', 'eom', 'ret_ld1', 'pred_ld1', 'lambda', "pred_ld1_demeaned"]]
     comb = pd.merge(weights, data_subset, on=['id', 'eom'], how='left')
 
     wealth_subset = wealth[['eom', 'wealth']]
@@ -198,6 +198,7 @@ def pf_ts_fun(weights, data, wealth, gam):
         turnover = np.sum(np.abs(g['w'] - g['w_start']))
         r = np.sum(g['w'] * g['ret_ld1'])
         r_pred = np.sum(g['w'] * g['pred_ld1'])  # Forventet afkast
+        r_pred_demeaned = np.sum(g['w'] * g['pred_ld1_demeaned'])
 
         unique_wealth = g['wealth'].unique()[0] if len(g['wealth'].unique()) > 0 else np.nan
         tc = (unique_wealth / 2) * np.sum(g['lambda'] * ((g['w'] - g['w_start']) ** 2))
@@ -208,6 +209,7 @@ def pf_ts_fun(weights, data, wealth, gam):
             'turnover': turnover,
             'r': r,
             'r_pred': r_pred,  # Tilføj til output
+            'r_pred_demeaned': r_pred_demeaned,
             'tc': tc
         })
 
