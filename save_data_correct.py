@@ -35,53 +35,46 @@ output_path = "./data_fifty/"
 file_path_usa_test = "./data_fifty/usa_test.parquet"
 daily_file_path = "./data_fifty/usa_dsf_test.parquet"
 file_path_world_ret = "./data_fifty/world_ret_test.csv"
-risk_free_path = "./data_fifty/risk_free_test.csv"   # samme
-market_path = "./data_fifty/market_returns_test.csv" # samme
+risk_free_path = "./data_fifty/risk_free_test.csv"
+market_path = "./data_fifty/market_returns_test.csv"
 
 #rente_path = "data_fifty/ff3_m.csv"
 wealth_end = pf_set["wealth"]
 end = settings["split"]["test_end"]
 market_test = Prepare_Data.load_and_filter_market_returns_test(market_path)
 
-# Kører funktioner fra data_run_files
 risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
-h_list = [1]  # Horisonter
+h_list = [1]
 wealth = Prepare_Data.wealth_func(wealth_end, end, market_test, risk_free)
 
 
 def create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data_ret_csv, output_data_ret_ld1_csv):
-    # Læs og filtrer data
     df_test = pd.read_csv(file_path_world_ret)
     kolonner = ["excntry", "id", "eom", "ret_exc"]
     monthly = df_test[kolonner]
     monthly = monthly[(monthly["excntry"] == "USA") & (monthly["id"] <= 99999)]
     monthly["eom"] = pd.to_datetime(monthly["eom"])
 
-    # Beregn long horizon returns (antager, at funktionen long_horizon_ret er defineret)
     data_ret = General_Functions.long_horizon_ret(data=monthly,
                                                   h=settings['pf']['hps']['m1']['K'],
                                                   impute="zero")
 
-    # Opret data_ret_ld1 med de relevante kolonner og beregn eom_ret
     data_ret_ld1 = data_ret[['id', 'eom', 'ret_ld1']].copy()
     data_ret_ld1['eom_ret'] = data_ret_ld1['eom'] + MonthEnd(1)
 
-    # Merge med risk_free og beregn total return tr_ld1
     data_ret_ld1 = data_ret_ld1.merge(risk_free, on='eom', how='left')
     data_ret_ld1['tr_ld1'] = data_ret_ld1['ret_ld1'] + data_ret_ld1['rf']
 
-    # Fjern kolonnen 'rf'
+
     data_ret_ld1 = data_ret_ld1.drop(columns=['rf'])
 
-    # Opret et shiftet DataFrame for at få tr_ld0 (total return fra næste periode)
     shifted = data_ret_ld1[['id', 'eom', 'tr_ld1']].copy()
     shifted['eom'] = shifted['eom'] + MonthEnd(1)
     shifted = shifted.rename(columns={'tr_ld1': 'tr_ld0'})
 
-    # Merge det shiftede DataFrame med data_ret_ld1 på 'id' og 'eom'
     data_ret_ld1 = data_ret_ld1.merge(shifted[['id', 'eom', 'tr_ld0']], on=['id', 'eom'], how='left')
 
-    # Fjern den midlertidige variable 'monthly'
+
     del monthly
     data_ret.to_csv(output_data_ret_csv, index=False)
     data_ret_ld1.to_csv(output_data_ret_ld1_csv, index=False)
@@ -89,8 +82,6 @@ def create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data
     return data_ret, data_ret_ld1
 
 
-# Eksempel på brug:
-# risk_free = data_run_files.process_risk_free_rate(risk_free_path, start_date)
 output_data_ret_csv = "./data_fifty/data_ret.csv"
 output_data_ret_ld1_csv = "./data_fifty/data_ret_ld1.csv"
 data_ret, data_ret_ld1 = create_data_ret_and_data_ret_ld1(file_path_world_ret, risk_free, output_data_ret_csv, output_data_ret_ld1_csv)
@@ -109,11 +100,8 @@ data_ret_ld1['eom_ret'] = pd.to_datetime(data_ret_ld1['eom_ret'])
 chars = pd.read_parquet(output_path_usa)
 
 
-# ---------------------------------------------------------
-# 2. Definér de kolonner, der skal hentes (unik liste)
-# Her antages, at 'features' er en liste med ekstra kolonnenavne
+
 selected_cols = list(set(["id", "eom", "sic", "size_grp", "me", "rvol_252d", "dolvol_126d"] + features))
-# Læs kun de nødvendige kolonner fra Parquet-filen
 chars = pd.read_parquet(output_path_usa, columns=selected_cols)
 
 chars = chars[chars['id'] <= 99999]
@@ -121,40 +109,29 @@ chars['eom'] = pd.to_datetime(chars['eom'])
 
 
 chars['dolvol'] = chars['dolvol_126d']
-# b) 'lambda' beregnes som 2/dolvol * settings['pi']
 chars['lambda'] = 2 / chars['dolvol'] * settings['pi']
-# c) 'rvol_m' beregnes som rvol_252d * sqrt(21)
 chars['rvol_m'] = chars['rvol_252d'] * np.sqrt(21)
 
 chars = pd.merge(chars, data_ret_ld1, on=['id', 'eom'], how='left')
 
 
 temp = wealth.copy()
-# Flyt eom til den sidste dag i næste måned:
 temp['eom'] = temp['eom'] + pd.offsets.MonthEnd(1)
-# Omdøb 'mu_ld1' til 'mu_ld0'
 temp = temp.rename(columns={'mu_ld1': 'mu_ld0'})
-# Merge wealth-data med chars på kolonnen eom
 chars = pd.merge(chars, temp[['eom', 'mu_ld0']], on='eom', how='left')
 
-
-# Date screen: Udregn andelen af rækker, hvor eom ligger uden for screens-intervallet
 date_excludes = ((chars['eom'] < settings['screens']['start']) | (chars['eom'] > settings['screens']['end'])).mean() * 100
 print(f"   Date screen excludes {date_excludes:.2f}% of the observations")
 
-# Filtrer data, så kun rækker med eom inden for intervallet beholdes
 chars = chars[(chars['eom'] >= settings['screens']['start']) & (chars['eom'] <= settings['screens']['end'])]
 
-# Monitor screen impact
 n_start = chars.shape[0]
 me_start = chars['me'].sum(skipna=True)
 
-# Require non-missing me
 me_missing_pct = chars['me'].isna().mean() * 100
 print(f"   Non-missing me excludes {me_missing_pct:.2f}% of the observations")
 chars = chars[~chars['me'].isna()]
 
-# Require non-missing return for t og t+1: (tr_ld1 og tr_ld0)
 valid_return_excludes = ((chars['tr_ld1'].isna()) | (chars['tr_ld0'].isna())).mean() * 100
 print(f"   Valid return req excludes {valid_return_excludes:.2f}% of the observations")
 chars = chars[chars['tr_ld0'].notna() & chars['tr_ld1'].notna()]
@@ -162,29 +139,22 @@ chars = chars[chars['tr_ld0'].notna() & chars['tr_ld1'].notna()]
 dolvol_excludes = ((chars['dolvol'].isna()) | (chars['dolvol'] == 0)).mean() * 100
 print(f"   Non-missing/non-zero dolvol excludes {dolvol_excludes:.2f}% of the observations")
 
-# Filtrer rækker, hvor 'dolvol' ikke er missing og > 0
 chars = chars[(~chars['dolvol'].isna()) & (chars['dolvol'] > 0)]
 
-# --- Require valid SIC code ---
-# Beregn andelen af observationer med en tom SIC (""), svarende til R's mean(chars$sic=="")
+# --- Valid SIC code ---
 sic_excludes = (chars['sic'] == "").mean() * 100
 print(f"   Valid SIC code excludes {sic_excludes:.2f}% of the observations")
 
-# Filtrer rækker, hvor 'sic' ikke er missing
 chars = chars[~chars['sic'].isna()]
 
 # --- Feature screens ---
-# For hver række beregnes antallet af ikke-missing feature-værdier (for de kolonner, der er defineret i 'features')
 feat_available = chars[features].notna().sum(axis=1)
 
-# Minimum antal features, som kræves: floor(antal features * settings['screens']['feat_pct'])
 min_feat = int(np.floor(len(features) * settings['screens']['feat_pct']))
 
-# Udregn procentdelen af observationer, hvor antallet af tilgængelige features er mindre end min_feat
 feat_excludes = (feat_available < min_feat).mean() * 100
 print(f"   At least {settings['screens']['feat_pct']*100:.0f}% of feature excludes {feat_excludes:.2f}% of the observations")
 
-# Filtrer rækker, hvor antallet af tilgængelige features er >= min_feat
 chars = chars[feat_available >= min_feat]
 
 final_obs_pct = (len(chars) / n_start) * 100
@@ -198,7 +168,6 @@ if run_sub:
     sample_ids = np.random.choice(unique_ids, size=2500, replace=False)
     chars = chars[chars['id'].isin(sample_ids)]
 if settings['feat_prank']:
-    # Konverter feature-kolonner til float (dobbelt præcision)
     chars[features] = chars[features].astype(float)
 
 
@@ -212,25 +181,19 @@ if settings['feat_prank']:
 
         zero = (chars[f] == 0)
 
-        # Udfør ECDF-transformation per gruppe defineret af 'eom'
         chars[f] = chars.groupby('eom')[f].transform(lambda s: ecdf_transform(s))
 
-        # Sæt de oprindelige 0-værdier tilbage til 0
         chars.loc[zero, f] = 0
 
 if settings['feat_impute']:
     if settings['feat_prank']:
-        # For hvert feature: hvis manglende, sæt til 0.5
         for f in features:
             chars[f] = chars[f].fillna(0.5)
     else:
-        # For hvert feature: imputér manglende værdier med median inden for hver eom-gruppe
         for f in features:
             chars[f] = chars.groupby('eom')[f].transform(lambda s: s.fillna(s.median()))
 
 
-
-# Konverter sic til numerisk (fejl konverteres til NaN)
 chars['sic'] = pd.to_numeric(chars['sic'], errors='coerce')
 
 
@@ -306,7 +269,6 @@ cond_hlth = (
 
 cond_money = chars['sic'].between(6000, 6999)
 
-# Saml betingelser og tilhørende valg
 conditions = [
     cond_no_dur,
     cond_durbl,
@@ -335,38 +297,28 @@ choices = [
     "Money"
 ]
 
-# Opret kolonnen ff12 med værdien "Other", hvis ingen betingelser er opfyldte
 chars['ff12'] = np.select(conditions, choices, default="Other")
 
-
-# Først: sortér DataFrame (ingen indsættelser sker her)
 chars.sort_values(['id', 'eom'], inplace=True)
 
-# Beregn lb
 lb = pf_set['lb_hor'] + 1
 
-# Beregn eom_lag og month_diff som separate serier
 eom_lag_series = chars.groupby('id')['eom'].shift(lb)
 
 def calc_month_diff(row):
-    # Hvis eom_lag er NaT, returner NaN
     if pd.isna(row['eom_lag']):
         return np.nan
     return (row['eom'].year - row['eom_lag'].year) * 12 + (row['eom'].month - row['eom_lag'].month)
 
-# Lav en midlertidig DataFrame for beregninger (uden at ændre chars løbende)
 temp_df = pd.concat([chars['eom'], eom_lag_series.rename('eom_lag')], axis=1)
 temp_df['month_diff'] = temp_df.apply(lambda row: calc_month_diff(row), axis=1)
 
-# Udregn exclusion rate (for de rækker hvor valid_data oprindeligt er True)
-# Her antages alle observationer at være gyldige til at starte med
+
 exclusion_rate = (((temp_df['month_diff'] != lb) | (temp_df['month_diff'].isna())).mean()) * 100
 print(f"   Valid lookback observation screen excludes {exclusion_rate:.2f}% of the observations")
 
-# Opdater valid_data: kun rækker med month_diff lig lb og ikke NaN er gyldige
 valid_data_series = (temp_df['month_diff'] == lb) & (~temp_df['month_diff'].isna())
 
-# Tilføj valid_data til chars ved at bruge pd.concat (samler alle nye kolonner på én gang)
 new_cols = pd.DataFrame({
     'valid_data': valid_data_series,
     'eom_lag': temp_df['eom_lag'],
@@ -375,10 +327,8 @@ new_cols = pd.DataFrame({
 
 chars = pd.concat([chars, new_cols], axis=1)
 
-# Opdater valid_data-kolonnen i chars
 chars['valid_data'] = chars['valid_data']
 
-# Fjern de midlertidige kolonner
 chars.drop(columns=['eom_lag', 'month_diff'], inplace=True)
 
 
@@ -397,13 +347,11 @@ def investment_universe(add, delete):
     n = len(add)
     included = [False] * n
     state = False
-    # Start fra anden observation (python-indeks 1)
     for i in range(1, n):
-        # Inkludér hvis aktivet ikke er inkluderet,
-        # men får et tilføjningssignal nu (og ikke fik signal i forrige periode)
+
         if (not state) and add[i] and (not add[i - 1]):
             state = True
-        # Fjern aktivet hvis det er inkluderet og får sletningssignal
+
         if state and delete[i]:
             state = False
         included[i] = state
@@ -438,14 +386,10 @@ def size_screen_fun(chars, type_screen):
 
     # --- Screen: Top N ---
     if "top" in type_screen:
-        # Ekstraher tallet fra strengen (fjerner alle ikke-cifrede tegn)
         top_n = int(re.sub(r"\D", "", type_screen))
-        # For rækker hvor valid_data er True, beregn rangeringen af me (descending) inden for hver eom
         chars.loc[chars['valid_data'] == True, 'me_rank'] = chars.groupby('eom')['me'].rank(ascending=False,
                                                                                             method='first')
-        # Sæt valid_size til True, hvis me_rank <= top_n og me_rank ikke er NA
         chars['valid_size'] = (chars['me_rank'] <= top_n) & (~chars['me_rank'].isna())
-        # Fjern den midlertidige kolonne
         chars.drop(columns='me_rank', inplace=True)
         count += 1
 
@@ -476,38 +420,30 @@ def size_screen_fun(chars, type_screen):
         else:
             raise ValueError("Percentile screen format invalid.")
         print(f"Percentile-based screening: Range {low_p}% - {high_p}%, min_n: {min_n} stocks")
-        # For rækker hvor valid_data er True: beregn ECDF for me inden for hver eom (brug rank i procent)
         chars.loc[chars['valid_data'] == True, 'me_perc'] = chars.groupby('eom')['me'].transform(
             lambda s: s.rank(method='average', pct=True))
-        # Sæt valid_size til True, hvis me_perc ligger inden for (low_p/100, high_p/100]
         chars['valid_size'] = (chars['me_perc'] > (low_p / 100)) & (chars['me_perc'] <= (high_p / 100)) & (
             ~chars['me_perc'].isna())
-        # Beregn gruppe-specifik statistik for hver eom
         group_stats = chars.groupby('eom').apply(lambda g: pd.Series({
             'n_tot': g['valid_data'].sum(),
             'n_size': g['valid_size'].sum(),
             'n_less': ((g['valid_data'] == True) & (g['me_perc'] <= (low_p / 100))).sum(),
             'n_more': ((g['valid_data'] == True) & (g['me_perc'] > (high_p / 100))).sum()
         }))
-        # Merge disse stats tilbage til chars
         chars = chars.merge(group_stats, left_on='eom', right_index=True, how='left')
-        # Beregn antallet af manglende aktier, der skal tilføjes
         chars['n_miss'] = np.maximum(min_n - chars['n_size'], 0)
-        # Beregn hvor mange aktier der skal tilføjes fra neden og ovenfra
         chars['n_below'] = np.ceil(np.minimum(chars['n_miss'] / 2, chars['n_less']))
         chars['n_above'] = np.ceil(np.minimum(chars['n_miss'] / 2, chars['n_more']))
-        # Juster, hvis summen af n_below og n_above er mindre end n_miss
         cond = (chars['n_below'] + chars['n_above'] < chars['n_miss']) & (chars['n_above'] > chars['n_below'])
         chars.loc[cond, 'n_above'] = chars.loc[cond, 'n_above'] + (
                     chars.loc[cond, 'n_miss'] - chars.loc[cond, 'n_above'] - chars.loc[cond, 'n_below'])
         cond = (chars['n_below'] + chars['n_above'] < chars['n_miss']) & (chars['n_above'] < chars['n_below'])
         chars.loc[cond, 'n_below'] = chars.loc[cond, 'n_below'] + (
                     chars.loc[cond, 'n_miss'] - chars.loc[cond, 'n_above'] - chars.loc[cond, 'n_below'])
-        # Endelig: sæt valid_size, med en udvidet grænse baseret på de beregnede tilføjelser
+
         chars['valid_size'] = (chars['me_perc'] > (low_p / 100 - chars['n_below'] / chars['n_tot'])) & \
                               (chars['me_perc'] <= (high_p / 100 + chars['n_above'] / chars['n_tot'])) & \
                               (~chars['me_perc'].isna())
-        # Fjern de midlertidige kolonner
         for col in ['me_perc', 'n_tot', 'n_size', 'n_less', 'n_more', 'n_miss', 'n_below', 'n_above']:
             if col in chars.columns:
                 chars.drop(columns=col, inplace=True)
@@ -541,29 +477,23 @@ def addition_deletion_fun(chars, addition_n, deletion_n, pf_set):
       - Udregner og printer gennemsnitlig turnover pr. eom.
       - Fjerner de midlertidige kolonner.
     """
-    # 1. Opret valid_temp
     chars['valid_temp'] = (chars['valid_data'] == True) & (chars['valid_size'] == True)
 
-    # 2. Sortér efter id og eom
     chars.sort_values(['id', 'eom'], inplace=True)
 
-    # 3. Beregn rullende summer for valid_temp inden for hver id
     chars['valid_int'] = chars['valid_temp'].astype(int)
     chars['addition_count'] = chars.groupby('id')['valid_int'] \
         .transform(lambda s: s.rolling(window=addition_n, min_periods=addition_n).sum())
     chars['deletion_count'] = chars.groupby('id')['valid_int'] \
         .transform(lambda s: s.rolling(window=deletion_n, min_periods=deletion_n).sum())
 
-    # 4. Definer flag for addition og deletion
     chars['add'] = (chars['addition_count'] == addition_n)
     chars['add'] = chars['add'].fillna(False)
     chars['delete'] = (chars['deletion_count'] == 0)
     chars['delete'] = chars['delete'].fillna(False)
 
-    # 5. Beregn antallet af observationer per id
     chars['n'] = chars.groupby('id')['id'].transform('count')
 
-    # 6. Anvend investment_universe for at udlede 'valid'
     def apply_investment_universe(df):
         add_list = df['add'].tolist()
         delete_list = df['delete'].tolist()
@@ -577,7 +507,6 @@ def addition_deletion_fun(chars, addition_n, deletion_n, pf_set):
     chars.loc[chars['n'] == 1, 'valid'] = False
     chars.loc[chars['valid_data'] == False, 'valid'] = False
 
-    # 7. Beregn Turnover
     chars['chg_raw'] = chars.groupby('id')['valid_temp'].transform(lambda s: s != s.shift(1))
     chars['chg_adj'] = chars.groupby('id')['valid'].transform(lambda s: s != s.shift(1))
 
@@ -586,7 +515,6 @@ def addition_deletion_fun(chars, addition_n, deletion_n, pf_set):
     chars['chg_raw_int'] = chars['chg_raw'].astype(int)
     chars['chg_adj_int'] = chars['chg_adj'].astype(int)
 
-    # Aggreger pr. eom
     turnover = chars.groupby('eom').agg(
         raw_n=pd.NamedAgg(column='valid_temp_int', aggfunc='sum'),
         adj_n=pd.NamedAgg(column='valid_int_new', aggfunc='sum'),
@@ -603,14 +531,12 @@ def addition_deletion_fun(chars, addition_n, deletion_n, pf_set):
 
     valid_turnover = turnover[(~turnover['raw'].isna()) & (~turnover['adj'].isna()) & (turnover['adj'] != 0)]
 
-    # Her beregner vi gennemsnittet af turnover over alle eom
     mean_raw = valid_turnover['raw'].mean()
     mean_adj = valid_turnover['adj'].mean()
 
     print(f"Turnover wo addition/deletion rule: {mean_raw * 100:.2f}%")
     print(f"Turnover w  addition/deletion rule: {mean_adj * 100:.2f}%")
 
-    # 8. Fjern midlertidige kolonner
     cols_to_drop = ['n', 'addition_count', 'deletion_count', 'add', 'delete',
                     'valid_temp', 'valid_data', 'valid_size',
                     'chg_raw', 'chg_adj', 'valid_temp_int', 'valid_int_new',
@@ -650,7 +576,6 @@ daily = daily[(daily['ret_exc'].notna()) &
               (daily['id'] <= 99999) &
               (daily['id'].isin(chars.loc[chars['valid'] == True, 'id'].unique()))]
 
-# Tilføj en ny kolonne 'eom' med månedens sidste dag
 daily['eom'] = daily['date'] + MonthEnd(0)
 daily.to_csv("./data_fifty/daily.csv", index=False)
 
@@ -678,9 +603,8 @@ search_grid_single = pd.DataFrame({
 search_grid = search_grid_single
 
 start_time = time.time()
-models = []  # Liste til at gemme output for hver horizon
+models = []
 
-# Iterer over rækkerne i search_grid
 for i in range(len(search_grid)):
     # Forbered y-variablen:
     h = search_grid.iloc[i]["horizon"]  # fx 1
@@ -695,21 +619,11 @@ for i in range(len(search_grid)):
     valid_chars = chars[chars['valid'] == True]
     data_pred = pd.merge(pred_y_df, valid_chars, on=['id', 'eom'], how='inner')
 
-    # ----------------- NYT: De-mean afkastene -----------------
-    # Beregn månedligt gennemsnit af afkastene baseret på 'eom'
-    data_pred['mean_ret'] = data_pred.groupby('eom')['ret_pred'].transform('mean')
-    # Beregn de-meanede afkast ved at trække det månedlige gennemsnit fra
-    data_pred['ret_pred_demeaned'] = data_pred['ret_pred'] - data_pred['mean_ret']
-    # Sørg for, at modellen trænes på de-meanede værdier
-    data_pred['ret_pred'] = data_pred['ret_pred_demeaned']
-    # -----------------------------------------------------------
-
     update_freq = settings['split']['model_update_freq']
     if update_freq == "once":
         val_ends = [settings['split']['train_end']]
         test_inc = 1000
     elif update_freq == "yearly":
-        # Opret en liste af datoer med årligt interval
         val_ends = pd.date_range(start=settings['split']['train_end'],
                                  end=settings['split']['test_end'],
                                  freq='YE').to_pydatetime().tolist()
@@ -726,11 +640,9 @@ for i in range(len(search_grid)):
     else:
         raise ValueError("Ugyldig model_update_freq i settings.")
 
-    op = {}  # Dictionary til at gemme modeloutput for hver validerings-slutdato
+    op = {}
     inner_start = time.time()
-    # Iterer over hver validerings-slutdato
     for val_end in val_ends:
-      #  print(val_end)
         train_test_val = return_prediction_functions.data_split(
             data_pred,
             type=update_freq,
@@ -742,19 +654,16 @@ for i in range(len(search_grid)):
             test_inc=test_inc,
             test_end=settings['split']['test_end']
         )
-    #    print("datasættet er tomt; hvis ja, stop loopet")
         if train_test_val["test"].empty:
-     #       print("Test datasættet er tomt for valideringsperiode:", val_end, ". Stopper forudsigelser.")
             break
         model_start = time.time()
-     #   print("det vi gætter efter", train_test_val["val"]["ret_pred"])
         model_op = return_prediction_functions.rff_hp_search(
             train_test_val,
             feat=features,
             p_vec=settings['rff']['p_vec'],
             g_vec=settings['rff']['g_vec'],
             l_vec=settings['rff']['l_vec'],
-            seed= 1 #settings['seed_no']
+            seed= 1
         )
         model_time = time.time() - model_start
         print("Model training time:", model_time, "seconds")
@@ -762,13 +671,10 @@ for i in range(len(search_grid)):
     inner_time = time.time() - inner_start
     print("Total time for current horizon:", inner_time, "seconds")
 
-    # ----------------- NYT: Tilføj månedlige gennemsnit til forudsigelser -----------------
-    # Opret DataFrame med månedlige gennemsnit
     monthly_means_df = (data_pred[['eom', 'mean_ret']]
                          .drop_duplicates()
                          .sort_values('eom')
                          .reset_index(drop=True))
-    # For hver datetime-key i op skal vi merge monthly_means_df med 'pred'-DataFrame'en
     for key in list(op.keys()):
         if isinstance(key, datetime.datetime):
             model_dict = op[key]
@@ -801,7 +707,6 @@ file_path_cluster_labels = "Data/Cluster Labels.csv"
 file_path_factor_details = "Data/Factor Details.xlsx"
 
 
-# Hvis du ikke har brug for den fjerde returnerede værdi, kan du bruge en underscore
 cluster_data_d, ind_factors, clusters, cluster_data_m  = Estimate_Covariance_Matrix.process_cluster_data(chars, daily, file_path_cluster_labels, file_path_factor_details)
 
 fct_ret_est = Estimate_Covariance_Matrix.run_regressions_by_date(cluster_data_d, ind_factors, clusters)

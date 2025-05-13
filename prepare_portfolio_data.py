@@ -39,25 +39,23 @@ def add_return_predictions(chars, settings, get_from_path_model):
     for h in range(1, 2): #Hardcoded 2 ind for vi har kun 1 horizon
         file_path = os.path.join(get_from_path_model, f"model_{h}.pkl")
         with open(file_path, 'rb') as f:
-            model_dict = pickle.load(f)  # Indlæs pickle-fil
+            model_dict = pickle.load(f)
 
-        # Iterer over dato-nøgler og udtræk forudsigelser
         all_preds = []
         for date_key, subdict in model_dict.items():
             pred_df = pd.DataFrame(subdict['pred'])
             all_preds.append(pred_df)
 
-        # Saml alle forudsigelsesdata
+
         pred_df_all = pd.concat(all_preds, ignore_index=True)
         pred_df_all = pred_df_all[['id', 'eom', 'pred']].rename(columns={'pred': f'pred_ld{h}'})
 
-        # Merge forudsigelserne ind i chars
         chars = chars.merge(pred_df_all, on=['id', 'eom'], how='left')
 
     return chars
 
 
-# Create lambda list ------------------------------------- virker
+# Create lambda list
 def create_lambda_list(chars):
     """
     Opretter en dictionary (`lambda_list`) af aktiers lambda-værdier pr. dato.
