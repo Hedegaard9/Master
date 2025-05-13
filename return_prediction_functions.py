@@ -31,18 +31,15 @@ def data_split(data, type, val_end, val_years, train_start, train_lookback, retr
     train_start = pd.to_datetime(train_start)
     test_end = pd.to_datetime(test_end)
 
-    # Beregn grænser
     train_end = val_end - relativedelta(years=val_years)
     train_start = max(train_start, train_end - relativedelta(years=train_lookback))
 
-    # Filtrer dataset
     op = {}
     op["val"] = data[(data["eom"] >= train_end) & (data["eom_pred_last"] <= val_end)]
     op["train"] = data[(data["eom"] >= train_start) & (data["eom_pred_last"] <= train_end)]
     op["train_full"] = data[(data["eom"] >= (val_end - relativedelta(years=retrain_lookback))) & (data["eom_pred_last"] <= val_end)]
     op["test"] = data[(data["eom"] >= val_end) & (data["eom"] < min(val_end + relativedelta(years=test_inc), test_end))]
-    # Valend burde være skarpt større i test potentielt
-    # loop igennem og tjek om nogle er de samme i de forskellige splits
+
     return op
 
 def ols_fit(data, feat):
@@ -67,7 +64,6 @@ def ols_fit(data, feat):
         print(model_results["pred"].head())  # Se forudsigelser
     """
 
-    # Definér trænings- og testdata
     train_data = data["train_full"]
     test_data = data["test"]
 
@@ -81,8 +77,6 @@ def ols_fit(data, feat):
 
     # Fit OLS model
     model = sm.OLS(y_train, X_train).fit()
-
-    # Lav forudsigelser på testdata
     X_test = test_data[feat]
     X_test = sm.add_constant(X_test)
     test_data["pred"] = model.predict(X_test)
@@ -122,12 +116,12 @@ def rff(X, p=None, g=None, W=None):
 
     # Generér vægtmatrix W
     if W is None:
-        k = X.shape[1]  # Antal features (dimensionen af X)
+        k = X.shape[1]
         W = np.random.multivariate_normal(
             mean=np.zeros(k),
             cov=g * np.eye(k),
             size=p // 2
-        ).T  # Transponér så dimensionerne matcher (k x p/2)
+        ).T
 
     # Beregn X_new = X * W
     X_new = np.dot(X, W)
@@ -136,7 +130,6 @@ def rff(X, p=None, g=None, W=None):
     X_cos = np.cos(X_new)
     X_sin = np.sin(X_new)
 
-    # Returnér vægte og transformeret data
     return {"W": W, "X_cos": X_cos, "X_sin": X_sin}
 
 
@@ -164,18 +157,15 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     val_errors_list = []
     rff_info = {}  # Gemmer rff_train["W"] for hver g
 
-    # Loop over g-værdier
+
     for g in g_vec:
         print(f"g: {g}")
-        # Generer random Fourier features for træningsdata med p = max(p_vec)
+
         rff_train = rff(data["train"][feat].values, p=max(p_vec), g=g)
-        # Brug de samme vægte til valideringsdata
         rff_val = rff(data["val"][feat].values, p=max(p_vec), W=rff_train["W"])
 
-        # Loop over p-værdier
         for p in p_vec:
             print(f"  --> p: {p}")
-            # Skalering: p^(-0.5) gange de første p/2 kolonner af cosine og sine
             half_p = int(p // 2)
             X_train = (p ** -0.5) * np.hstack((rff_train["X_cos"][:, :half_p],
                                                rff_train["X_sin"][:, :half_p]))
@@ -192,7 +182,6 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
                 mse = np.mean((preds - y_val) ** 2)
                 val_errors_list.append({"g": g, "p": p, "lambda": lam, "mse": mse})
 
-        # Gem W for den aktuelle g (kun én gang pr. g)
         rff_info[str(g)] = rff_train["W"]
 
     val_errors_df = pd.DataFrame(val_errors_list)
@@ -201,7 +190,6 @@ def rff_hp_search(data, feat, p_vec, g_vec, l_vec, seed):
     opt_hps = val_errors_df.loc[opt_idx]
     print(f"Optimal g: {opt_hps['g']}, p: {opt_hps['p']}, lambda: {opt_hps['lambda']}, MSE: {opt_hps['mse']}")
 
-    # Hent de optimale weights for den valgte g: tag de første p/2 kolonner
     opt_g = str(opt_hps["g"])
     opt_p = int(opt_hps["p"])
     half_opt_p = int(opt_p // 2)
@@ -494,7 +482,6 @@ def xgb_hp_search(data, feat, vol_scale, hp_grid, iter, es, cores, seed):
         pred_op = data["test"][["id", "eom"]].copy()
         pred_op["pred"] = pred
 
-    # Returnér resultater
     return {
         "fit": final_model,
         "best_hp": best_hp,
