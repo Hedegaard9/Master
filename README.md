@@ -35,8 +35,8 @@ Hvis du bruger kode eller inspiration fra dette projekt, henvis da også til ori
 
 - 📓 **`Implementable efficient frontier.ipynb`** – Genererer og visualiserer den implementerbare effektive rand (IEF) 
 - 📓 **`Base analysis_plots.ipynb`** – Visualiseringer af base case-resultater og performance  
-- 📓 **`IEF_1.ipynb`** – Tilpasset version af IEF-analyse  
-- 📓 **`TC_optimering_Markowitz_ML.ipynb`** – Optimering af porteføljevalg under transaktionsomkostninger  
+- 📓 **`IEF_1.ipynb`** – Generer IEF for Portfolio-ML, Static-ML m.m, Performance og diverse analyser  
+- 📓 **`TC_optimering_Markowitz_ML.ipynb`** – Max-norm løsningen og L2-norm løsningen med Markowitz-ML som modelportefølje (TC-optimering)  
 - 📓 **`Cost_opt_markowitz.ipynb`** – Markowitz-optimering med fokus på handelsomkostninger
 - 📓 **`Prediction_new.ipynb`** – Alternativ version af forudsigelser med justerede parametre  
 - 📓 **`Fit_models_Jonas-Copy1 (4) (1).ipynb`** – Testversion af modeltræning  
