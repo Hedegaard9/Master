@@ -141,7 +141,6 @@ def tpf_implement(data, cov_list, wealth, dates, gam):
 
     return {"w": tpf_w, "pf": tpf_pf}
 
-
 # Counterfactual TPF
 def tpf_cf_fun(data, cf_cluster, er_models, cluster_labels, wealth, gamma_rel, cov_list, dates, seed):
     np.random.seed(seed)
