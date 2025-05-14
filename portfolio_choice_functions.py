@@ -8,6 +8,7 @@ import General_Functions
 import importlib
 from General_Functions import initial_weights_new, create_cov, pf_ts_fun, sigma_gam_adj, create_lambda
 from return_prediction_functions import rff
+from pandas.tseries.offsets import MonthEnd
 
 sqrtm_cpp = importlib.import_module("sqrtm_cpp")
 
