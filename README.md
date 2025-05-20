@@ -24,9 +24,9 @@ Hvis du bruger kode eller inspiration fra dette projekt, henvis da også til ori
 - 📂 **`data_test/`** – For at bruge mappen skal id filen bruges på de resterende rå datasæt
 - 📄 **`Main.py`** – Hovedscript der definerer de valgte settings 
 - 📄 **`Prepare_Data.py`** – Funktioner til at klargøre og transformerer rådata
-- 📄 **`fit_models.py`** – Træner ML-modeller til return prediction  
-- 📄 **`Estimate_Covariance_Matrix.py`** – Estimerer kovariansmatricer (fx Barra) 
-- 📄 **`return_prediction_functions.py`** – Funktioner til prediktion (fx Barra) 
+- 📄 **`fit_models.py`** – Træner ML-modeller til return prædiktion  
+- 📄 **`Estimate_Covariance_Matrix.py`** – Estimerer kovariansmatricer
+- 📄 **`return_prediction_functions.py`** – Funktioner til prædiktion
 - 📄 **`portfolio_choice_functions.py`** – Funktioner til porteføljevalg og optimering  
 - 📄 **`requirements.txt`** – Python-pakker som kræves for at køre projektet  
 - 📄 **`README.md`** – Denne beskrivelse  
@@ -34,13 +34,13 @@ Hvis du bruger kode eller inspiration fra dette projekt, henvis da også til ori
 
 ## 📓 Jupyter Notebooks
 
-- 📓 **`Implementable efficient frontier.ipynb`** – Genererer og visualiserer den implementerbare effektive rand (IEF) 
+- 📓 **`Implementable efficient frontier.ipynb`** – Genererer og visualiserer den implementerbare efficente frontier (IEF) 
 - 📓 **`Bindende_bibetingelse_illustration.ipynb`** – Visualiseringer af bindende bibetingelse
 - 📓 **`Base analysis_plots.ipynb`** – Visualiseringer af faktorer i hver klynge 
-- 📓 **`IEF_1.ipynb`** – – Genererer IEF for Portfolio-ML, Static-ML m.m, Performance og diverse analyser 
+- 📓 **`IEF_1.ipynb`** – Genererer IEF for Portfolio-ML, Static-ML m.m, Performance og diverse analyser 
 - 📓 **`TC_optimering_Markowitz_ML.ipynb`** – Max-norm løsningen og L2-norm løsningen med Markowitz-ML som modelportefølje (TC-optimering)
 - 📓 **`Prediction_new.ipynb`** – Alternativ version af prædiktioner med forskellige slags kørsler  
-- 📓 **`new_demean_ucloud.ipynb`** – Mest rene prædiktionsfil brugt i uCloud.  
+- 📓 **`new_demean_ucloud.ipynb`** – Mest rene prædiktionsfil brugt i UCloud.  
 - 📓 **`Portfolios_factors_overview.ipynb`** – Kørsel af modeller og faktor eskponering. Mange plots af resultater 
 - 📓 **`Create testsets.ipynb`** – Genererer og gemmer testdatasæt til kørsel ud fra valgte ids.
 - 📓 **`Barra_cov_check.ipynb`** – Skaber en barracov over et valgt dataset
